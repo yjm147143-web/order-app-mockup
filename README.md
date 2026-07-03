@@ -1,0 +1,494 @@
+# 사장님 관리자 앱 — STEP 1~4 + 구조 개편 + 주문/메뉴/매출 화면 재개편 + 팝업/로그인 개편
+
+매장용 "사장님 관리자 앱" PRD의 STEP 1(프로젝트 기반 구축) + STEP 2(주문 수신 POS) +
+STEP 3(고객 목록·카카오 알림톡 호출·주문완료 처리) + STEP 4(메뉴 등록·수정·품절 처리) +
+구조 개편(하단 탭 제거) + 주문 화면 전면 개편 + 메뉴 관리 화면 개편 + 오프라인 시뮬레이션 +
+팝업 위치 통일 + 로그인 화면 개편 + 주문 상태 구조 재개편(대기/접수/완료) + 메뉴·매출 화면
+추가 개선 산출물입니다.
+
+## 주문 화면 — 상태 구조 재개편(대기 → 접수 → 완료)
+
+- 상태 탭을 **대기(WAITING) / 접수(RECEIVED) / 완료(COMPLETED+CANCELED)** 3개로 재구성했다.
+  기존 '호출' 탭은 삭제했다 — 호출은 이제 접수 탭 안에서 반복 가능한 액션일 뿐 별도 상태가 아니다.
+  QR/태블릿 신규 주문은 항상 **대기** 탭에 먼저 들어가고, 대기 탭 카드의 **'주문 수락'** 버튼을
+  눌러야 접수 탭으로 넘어간다. 접수 탭에서는 '고객 호출'을 몇 번이든 누를 수 있고(호출 시마다
+  버튼 옆 "(N회)"가 올라간다), '완료 처리'를 누르면 완료 탭으로 넘어간다. 완료 탭의 '되돌리기'는
+  다시 접수 탭으로 되돌린다(더 이상 돌아갈 '호출' 탭이 없으므로).
+- **완료 처리 누적 횟수**(`Order.completedCount`)를 새로 추가했다 — COMPLETED로 전이될 때마다 1
+  증가하고, 되돌리기는 이 값을 줄이지 않는다(되돌렸다가 다시 완료 처리하면 2, 3...으로 계속
+  누적). 카드 앞면에는 노출하지 않고 '펼쳐보기' 상세 안에 "완료 처리 횟수" 항목으로만 보여준다.
+  `src/api/mockApi.js`의 `advanceOrderStatus`/`revertCompletedToReceived`(기존 `revertCompletedToReady`에서
+  개명)에서 관리하며, localStorage 목업 DB(`sajang-app-mock-db-v7`)에 그대로 저장된다.
+- 카드 안 카카오 알림톡 **미리보기 문구와 '성공' 표시를 삭제**했다 — 호출 시 문구/버튼 없이 바로
+  발송 처리되고 호출 횟수만 올라간다. 발송 **실패** 안내와 재발송(같은 '고객 호출' 버튼 재클릭)
+  옵션은 그대로 유지했다.
+- 채널 뱃지에 이모지를 추가했다: 태블릿오더 🖥️, QR오더 🔳.
+- 오입력 의심 전화번호를 자릿수와 무관하게 항상 `000-0000-0000` 형태(3-4-4 하이픈)로
+  포맷팅해서 보여주도록 `formatFullPhone`을 수정했다(기존엔 11자리가 아니면 하이픈 없이 그대로
+  나열했음). 빨간 볼드 + "오입력 가능성 있음" 문구는 그대로 유지.
+- 화면 상단 검색 아이콘을 누르면 픽업번호/테이블번호로 현재 탭의 주문을 필터링하는 검색창이
+  나타난다(`tableOrPickupNo` 필드 부분일치 검색).
+- '주문을 취소할까요?' 팝업에서 "환불은 결제 시스템에서 별도 처리됩니다" 문구를 삭제하고,
+  취소 사유에 **'직접입력'**을 추가했다(선택 시 placeholder가 '직접입력'인 텍스트 입력칸이
+  뜬다). 취소를 확정하면 "취소 처리가 완료되었습니다" 안내 팝업이 화면 중앙에 추가로 뜬다.
+- 변경 파일: `src/screens/customers.js`(대부분 재작성), `src/api/mockApi.js`, `src/data/mockData.js`,
+  `src/components/ui.js`(검색 아이콘 추가, 토스트가 하단 고정 버튼과 겹치지 않도록 오프셋 보정),
+  `src/styles/components.css`.
+
+## 메뉴 추가/수정 + 매출 조회 화면 개선
+
+- **예상 대기시간을 메뉴별 값에서 매장 전체 공통 값으로 변경**했다. 메뉴 등록/수정 폼에 있던
+  '예상 조리 시간' 입력 필드는 완전히 제거했고(기존에 메뉴마다 입력돼 있던 값은 데이터 모델
+  자체에서 필드를 없애면서 함께 사라졌다 — 별도 이관 없이 단순 삭제 처리), 대신 메뉴 관리 화면
+  상단에 '예상 대기시간' 카드를 추가해 5분 단위 +/- 버튼으로 매장 전체 값(`Store.estimatedWaitMinutes`,
+  기본 15분)을 사장님이 직접 조정한다. 값을 바꾸면 "현재 예상 대기 시간은 약 OO분 이내입니다"
+  문구도 즉시 갱신된다.
+- 품절 토글을 켰을 때 빨간 '품절' 뱃지와 회색 캡션 문구가 겹치던 버그를 고쳤다 — 뱃지 자체를
+  없애고, 기존 회색 '품절' 캡션이 토글 ON 상태에서 빨간 볼드체로 바뀌도록 수정했다(`.soldout-toggle-caption.active`).
+- 메뉴 등록/수정 폼에 '옵션 그룹 사용' ON/OFF 토글을 추가했다. 꺼져 있으면 옵션 그룹 관련 UI
+  전체(그룹 목록 + '옵션 그룹 추가' 버튼)가 화면에서 사라지고, 켜면 다시 나타난다. 저장 시
+  토글이 꺼져 있으면 옵션 그룹은 빈 배열로 저장된다.
+- '품절됐습니다' 토스트가 화면 하단 '메뉴 추가' 고정 버튼과 겹치던 버그를 고쳤다 — 토스트가 뜰
+  때 현재 화면에 `.cta-fixed` 버튼이 있으면 그 높이만큼 위로 띄우도록 `UI.showToast`를 수정했다
+  (메뉴 화면뿐 아니라 하단 고정 버튼이 있는 다른 화면에도 동일하게 적용됨).
+- 매출 조회의 **시간대별 매출**에는 막대 차트를, **결제수단별**·**주문경로별** 매출에는 도넛
+  차트를 추가했다(기존 순위 리스트는 그대로 아래에 유지). 별도 차트 라이브러리 설치 없이
+  순수 SVG로 직접 그렸다 — Node/npm이 없는 이 목업 환경의 제약이기도 하지만, 그와 별개로 이
+  프로젝트는 아이콘도 처음부터 인라인 SVG로 하드코딩해왔기 때문에(`ui.js`의 `Icons`) 같은
+  방식을 그대로 따른 것이다. 색상은 그레이스케일 위주이고 강조가 필요한 지점(막대 그래프의
+  최댓값)에만 앱의 포인트 컬러인 블랙을 사용했다. **실제 React Native 전환 시에는
+  `react-native-svg` + `victory-native`(또는 `react-native-chart-kit`) 조합으로 옮기는 것을
+  권장**하며, `barChartSvg`/`donutChartSvg`에 넘기는 데이터 형태(`rows: [{label, amount}]`)를
+  그대로 각 라이브러리의 data prop으로 재사용할 수 있다.
+- 변경 파일: `src/screens/menu.js`(대부분 재작성), `src/screens/sales.js`, `src/api/mockApi.js`
+  (`updateEstimatedWaitMinutes` 추가, `cookTimeMinutes` 관련 코드 제거), `src/data/mockData.js`,
+  `src/components/ui.js`, `src/styles/components.css`.
+
+## 팝업 위치 통일 + 로그인 화면 개편
+
+**팝업 위치 규칙**
+- 앱 전체의 "알림/확인 팝업"(영업상태 변경 확인, 주문취소 확인, 카테고리/메뉴 삭제 확인, 품절
+  처리 완료 안내 등)을 화면 하단 시트가 아니라 **화면 정중앙 모달 카드**로 통일했다.
+  (`src/styles/components.css`의 `.modal-overlay`를 `align-items:center`로 변경,
+  `.modal-sheet`를 사방 둥근 카드(`border-radius:20px`)로 변경. 토스트(`.toast-host`)도
+  같은 방식으로 중앙에 뜨도록 바꾸고, 살짝 어두운 반투명 배경(백드롭)을 추가해 배경을 클릭하면
+  바로 닫히게 했다.)
+- **예외**: 설정 > 메뉴 추가 및 수정에서 메뉴를 등록/수정할 때 쓰는 폼(`renderMenuFormModal`,
+  `menu-form-overlay`)만 기존처럼 화면 하단에서 올라오는 시트 형태를 그대로 유지한다
+  (`.modal-overlay-bottom` 클래스로 예외 처리). 카테고리 관리 모달은 이 예외에 포함되지
+  않으므로 중앙 모달로 바뀌었다.
+- 참고: 요청 예시에 있던 "재호출 확인 팝업"과 "완료 되돌리기 확인 팝업"은 이전 '주문 화면 전면
+  개편' 단계에서 사용자 요청으로 이미 확인창 없이 바로 처리되도록 단순화되어 있어, 현재 코드에는
+  해당 팝업 자체가 존재하지 않는다. 이번 작업에서는 새로 만들지 않고 위치 규칙만 기존에 존재하는
+  팝업(영업상태/주문취소/카테고리·메뉴 삭제/토스트)에 적용했다. 혹시 두 확인창을 다시 추가하고
+  싶다면 별도로 알려달라.
+
+**로그인 화면 (`src/screens/login.js`)**
+1. **자동 로그인 체크박스**: 체크하고 로그인하면 세션이 저장되어 다음 실행(새로고침) 시 로그인
+   화면을 건너뛰고 바로 '주문' 화면으로 이동한다. 체크하지 않으면 세션이 저장되지 않아 다음
+   실행 시 다시 로그인 화면부터 시작한다. (`src/state/store.js` — `AppState.login(user, autoLogin)`,
+   `loadSession()`이 `autoLogin`이 꺼진 세션은 복원하지 않음)
+2. **아이디/비밀번호 찾기 버튼**: 클릭하면 새 탭으로 임시 URL을 연다. **실제 URL이 정해지면
+   [`src/config.js`](src/config.js)의 `AppConfig.FIND_ACCOUNT_URL` 값만 교체하면 된다**
+   (현재 임시값: `https://example.com/find-account`).
+3. 타이틀 문구를 "사장님 관리자" → **"ORDER APP"** 으로 변경.
+4. 로그인 입력창 위에 **사장님 / 행사 담당자** 선택 탭 추가. '사장님'(기본 선택)은 기존 로그인
+   흐름 그대로 동작한다. '행사 담당자'를 선택하고 로그인 버튼을 누르면 아이디/비밀번호 검증 없이
+   바로 신규 플레이스홀더 화면인 **행사 담당자 대시보드**(`src/screens/eventManagerDashboard.js`,
+   "준비 중입니다" 문구)로 이동한다. 실제 행사 담당자 기능/계정 체계는 아직 없다.
+- 변경/신규 파일: `src/screens/login.js`, `src/screens/eventManagerDashboard.js`(신규),
+  `src/config.js`(신규), `src/state/store.js`, `src/components/ui.js`(토스트 백드롭),
+  `src/styles/components.css`(모달/토스트/역할탭/체크박스 스타일), `src/screens/menu.js`
+  (메뉴 폼 모달에 예외 클래스 부여), `index.html`(스크립트 태그 추가).
+
+## 개발자 옵션 — 테스트 주문 생성 버튼
+
+- 설정 > 개발자 옵션에 **"주문 넣기"** 버튼을 추가했다. 누르면 `MockApi.createRandomOrder`를
+  5회 순차 호출해 무작위 신규 주문 5건을 만들고, 성공/실패 건수를 토스트로 안내한다(영업 중
+  상태가 아니면 생성되지 않는 기존 규칙을 그대로 따른다). 변경 파일: `src/screens/settings.js`.
+
+## 오프라인 시뮬레이션 (설정 > 개발자 옵션)
+
+- 실제 네트워크가 없는 목업 앱이라 브라우저 개발자도구의 "오프라인 전환" 대신, 설정 화면 맨
+  아래 '개발자 옵션' 섹션에 **오프라인 시뮬레이션** 토글을 추가했다(`AppState.isOffline`,
+  새로고침하면 항상 꺼진 상태로 초기화 — 켜둔 채 잊어버리는 것 방지).
+- 켜져 있으면 '주문' 화면 상단에 **"오프라인 — 최신 상태 아님"** 배너가 뜨고, 이미 받아온
+  주문 목록을 그대로 보여줄 뿐 더 이상 새로 불러오지 않는다(20초 주기 자동 새로고침도 이 동안은
+  건너뜀). 고객 호출/완료 처리/되돌리기/주문 취소/일괄 호출·완료처리 버튼이 전부 비활성화된다.
+- 꺼면 즉시 배너가 사라지고 다음 새로고침부터 정상적으로 최신 데이터를 다시 불러온다.
+- 변경 파일: `src/state/store.js`(`isOffline`/`setOffline` 추가), `src/screens/settings.js`
+  (개발자 옵션 섹션), `src/screens/customers.js`(오프라인 배너 + fetch 스킵 + 버튼 비활성화),
+  `src/styles/components.css`(`.offline-banner`, `.debug-section-title`).
+
+## 메뉴 관리 화면 개편
+
+- **'전체' 카테고리 탭 추가**: 카테고리 탭 맨 앞에 '전체'가 추가되어 카테고리 구분 없이 모든
+  메뉴를 한 리스트로 볼 수 있다(기본 진입 화면도 이제 '전체'). '전체' 보기에서는 각 메뉴 카드에
+  소속 카테고리 배지를 함께 표시해 어떤 카테고리인지 구분할 수 있게 했다.
+- **품절 토글 라벨**: 메뉴 리스트의 품절 토글 위에 작은 '품절' 캡션을 항상 표시해 토글의 용도를
+  명확히 했다.
+- **노출 여부 안내 문구**: '노출 여부' 토글 아래에 상태에 따라 문구가 바뀌는 안내를 추가했다 —
+  켜짐: "지금은 고객님 화면에 잘 보이고 있어요." / 꺼짐: "꺼두면 고객님 화면에서 잠시 숨겨져요.
+  나중에 다시 켜면 바로 보여드릴 수 있어요."(해요체·긍정적 톤).
+- **재고 관리**: 메뉴별 '재고 수량' 입력(선택, 0 이상 숫자, 비워두면 무제한)과 매장 단위 '재고
+  소진 시 자동 품절' 설정(설정 화면, 기본값 켜짐)을 추가했다. 재고를 0으로 저장하는 순간
+  자동 품절 설정이 켜져 있으면 즉시 `isSoldout=true`로 전환된다(꺼져 있으면 전환 안 함 — 두
+  경우 모두 직접 테스트로 확인). 메뉴 리스트에는 재고가 설정된 메뉴에 한해 "재고 N개"를 작게
+  표시한다.
+- **예상 조리 시간**: 메뉴별 '예상 조리 시간(분)' 입력을 추가하고, 메뉴 리스트 카드와 등록/수정
+  폼의 고객 미리보기 카드 양쪽에 "예상 조리시간 O분"으로 표시한다.
+- **옵션별 품절 처리**: 옵션 그룹 안 각 옵션 항목에도 개별 품절 토글을 추가했다. 품절 처리된
+  옵션은 고객 미리보기 카드에서 취소선 + "· 품절" 표시로 선택 불가임을 나타낸다.
+- **카테고리 관리 위치**: 카테고리 추가/수정/숨김/삭제/순서 변경 기능은 원래부터 설정 화면이
+  아니라 메뉴 관리 화면 자체의 상단바(우측 아이콘)에 있었고, 이번에도 그대로 유지했다 — 설정
+  화면 목록에는 카테고리 관리 항목이 없다.
+
+### 데이터 모델에 추가된 필드
+
+- `MenuItem.stockQuantity` (number | null) — null이면 재고 관리를 쓰지 않는 무제한 메뉴.
+- `MenuItem.cookTimeMinutes` (number | null) — 예상 조리 시간(분), 선택값.
+- `MenuItem.optionGroups[].options[].isSoldout` (boolean) — 옵션 항목 단위 품절 여부.
+- `Store.autoSoldoutOnZeroStock` (boolean, 기본 true) — 재고 0 도달 시 자동 품절 처리 여부.
+- 신규 API: `MockApi.setAutoSoldoutOnZeroStock(storeId, enabled)`.
+- `localStorage` 스키마 버전 v5 → v6(재시드 필요해서 올림).
+
+## 주문 화면 전면 개편
+
+- **상단 공통 정보 바 추가**: 영업상태 표시 버튼(클릭 시 설정 화면으로 이동) + 계정 유형
+  (관리자 계정/직원 계정) + '전체 펼치기·접기' 토글을 화면 최상단에 고정 배치.
+- **탭 이름 변경**: `조리중 → 접수`. 탭은 `접수 / 호출 / 완료` 3개.
+- **카드 스타일 통일**: 카드 배경을 밝은 회색(`--color-divider`)으로 통일하고, 취소된 주문만
+  빨간 배경+테두리로 구분한다(기존에 있던 "신규 주문 빨간 테두리" 강조는 제거 — 이제 빨간색은
+  취소된 주문에만 쓴다).
+- **액션 버튼 색상 구분**: 고객 호출=블랙(`btn-primary`), 완료 처리=그린(`btn-success`),
+  주문 취소=레드(`btn-danger-solid`)로 명확히 구분. 채널 배지도 QR오더=블랙 필, 태블릿오더=
+  화이트+블랙 테두리 필로 구분하고 볼드 처리했다.
+- **카드 레이아웃 변경**: 좌측에 대표 메뉴명("바닐라라떼" 등, 크고 굵게), 우측 상단에
+  픽업번호/테이블번호(라벨은 작게, 값은 크고 굵게) — 요청 예시(픽업번호 6666 + 바닐라라떼)와
+  동일하게 배치. 결제금액은 버튼이 아닌 일반 텍스트로 변경.
+- **전화번호 마스킹 해제 + 오입력 경고**: 전체 번호를 그대로 표시하고, 010으로 시작하지 않거나
+  11자리가 아니면 ⚠️ + 빨간 굵은 글씨 + "오입력 가능성 있음" 보조 문구를 노출한다. 시드 데이터에
+  테스트용 오입력 번호 2건을 심어뒀고, 실시간 시뮬레이터도 약 15% 확률로 오입력 번호를 생성한다.
+- **시간대 그룹 접기/펼치기 + 일괄 선택**: 각 5분 그룹을 개별로 접고 펼 수 있고, 상단
+  '전체 펼치기/접기'로 전체를 한 번에 제어한다. 그룹 헤더의 체크박스로 그룹 내 전체 선택도
+  가능하고, 1건 이상 선택 시 그룹 상단에 일괄 액션바("N건 선택됨" + 일괄 호출 + 일괄 완료처리,
+  완료 탭에서는 일괄 완료처리 버튼 숨김)가 나타난다.
+- **호출 관련 정책 변경**: '카톡으로 호출' → **'고객 호출'**로 이름 변경. 재호출 전 확인 팝업과
+  '다시 보내기' 버튼을 없애고, 접수/호출 탭 어디서든 같은 '고객 호출' 버튼을 눌러 바로 발송하며
+  호출 시도 횟수(`NotificationLog` 건수)를 버튼 옆에 "(N회)"로 누적 표시한다. 카드에 있던
+  '호출완료'/'발송 실패' 상태 배지는 삭제했다(호출 이력은 펼쳐보기 안에서 계속 확인 가능).
+- **완료 탭 안전장치**: 완료 탭에는 '완료 처리' 버튼 대신 **'되돌리기'** 버튼을 두어 실수로 완료
+  처리한 주문을 READY(호출) 상태로 되돌릴 수 있다(`MockApi.revertCompletedToReady` 신규 — 유일하게
+  역방향 상태 전이를 허용하는 예외 함수).
+
+### ⚠️ 정책 완화 — "접수 단계에서도 고객 호출 항상 가능"
+
+기존 STEP3 규칙은 "READY(준비완료) 상태에서만 호출 가능"이었는데, 이번 요청으로 **주문 상태와
+무관하게(취소 제외) 항상 호출 가능**하도록 의도적으로 완화했다. 영향을 주는 지점:
+
+- `MockApi.buildKakaoMessage`가 반환하는 고정 문구는 여전히 "주문하신 메뉴가 **준비되었습니다**"
+  이다. 이제 접수(RECEIVED) 단계에서도 호출이 가능해졌으므로, 아직 준비되지 않은 주문에 대해
+  호출하면 실제 상태와 문구가 어긋날 수 있다. 이번 작업 범위에는 문구 수정이 포함되지 않아 그대로
+  뒀다 — 문구를 상태별로 분기하려면 `buildKakaoMessage`와 `sendKakaoAlert`를 함께 손봐야 한다.
+- `MockApi.sendKakaoAlert` 자체는 원래도 상태 검증 없이 동작했기 때문에(주문 존재 여부만 확인)
+  API 레벨 변경은 없었다 — 이번 변경은 전적으로 화면(customers.js)의 버튼 `disabled` 조건 완화다.
+
+## 신규/변경 파일 (이번 작업)
+
+- 변경: `src/screens/customers.js`(전면 재작성), `src/api/mockApi.js`(`revertCompletedToReady`
+  추가, 시뮬레이터 오입력 번호 생성 로직, DB 스키마 버전 v4→v5), `src/data/mockData.js`
+  (오입력 테스트용 시드 전화번호 2건), `src/styles/components.css`(카드/채널배지/정보바/그룹
+  헤더/일괄 액션바 스타일 대거 추가·수정).
+
+## 구조 개편 — 하단 탭바 제거, '주문' 화면을 기본 화면으로
+
+- **탭바 제거**: 하단 탭이 홈/고객/메뉴 3개에서 화면 1개('주문')만 남게 되어, 탭바 UI 자체를
+  없앴다(`UI.tabBar()` 함수와 관련 CSS 삭제). '주문' 화면(`src/screens/customers.js`, 파일명은
+  이전 단계와의 연속성을 위해 유지)이 로그인 직후 항상 보이는 앱의 기본 화면이 된다.
+- **설정 진입 통일**: 설정 아이콘은 '주문' 화면 상단 우측 한 곳에서만 진입하며, 앱 전체에서 이
+  위치가 유일한 설정 진입점이다. 화면 계층은 `주문 → 설정 → 메뉴 추가 및 수정 / 매출 조회`
+  형태의 스택 구조이고, 각 하위 화면의 뒤로가기는 한 단계 위로만 돌아간다.
+- **홈 화면 삭제**: `src/screens/home.js` 삭제. 홈에 있던 오늘 매출/주문건수/대기 고객 요약
+  카드는 이번 개편 범위에 포함되지 않아 함께 제거됐다(필요하면 별도로 요청해줘 — 매출 조회
+  화면과 겹치는 부분이 있어 통합 여부를 먼저 확인하고 진행하는 게 좋을 것 같다).
+- **영업상태 3단계**: `Store.operatingStatus` 가 `OPEN`/`CLOSED` 2단계에서
+  **`CLOSED(마감) / OPEN(영업중) / PAUSED(일시중지)`** 3단계로 바뀌었다. 신규 주문 생성은
+  여전히 `OPEN`일 때만 허용(`CLOSED`/`PAUSED` 둘 다 차단). 설정 화면 최상단 카드에서
+  상태에 따라 노출되는 버튼이 달라진다(마감→개점만 / 영업중→일시중지+마감 / 일시중지→일시중지
+  해제+마감). 버튼 클릭 시 항상 확인 팝업(`UI.confirmModalHtml` 재사용) 후에만 실제로 전환되고,
+  버튼은 색상으로 구분된다(개점·해제=초록 `--color-accent-green`, 일시중지=주황
+  `--color-accent-amber`, 마감=빨강 `--color-accent-red`) — 이건 STEP1의 블랙앤화이트 원칙에서
+  벗어나는 예외로, 이번 요청에 따라 의도적으로 색상을 추가한 부분이다.
+- **메뉴 관리 진입 경로 변경**: 더 이상 하단 탭이 아니라 설정 화면의 '메뉴 추가 및 수정' 항목으로
+  들어간다. 화면 자체(`src/screens/menu.js`)는 그대로 재사용했고, 상단바만 좌측 뒤로가기(→설정)
+  + 우측 카테고리 관리 아이콘 구조로 바꿨다.
+- **매출 조회 신규**: 설정 화면의 '매출 조회' 항목 → 5개 기준(기간별📊/시간대별🕒/메뉴별🍽️/
+  결제수단별💳/주문경로별🧾) 타일 허브 → 각 기준 상세 화면(오늘/최근7일/최근30일/직접 선택 기간
+  필터 공통 제공). 데이터는 실제 주문/주문항목에서 실시간 집계하며(`MockApi.getSalesBreakdown`),
+  결제수단만 모델에 없는 값이라 주문 id를 해시해 카드:간편결제:현금 ≈ 6:3:1 비율로 나눈 목업이다
+  (실제 결제수단 필드가 생기면 그 부분만 교체하면 된다). 이모티콘은 임시이며, 참고 이미지를 받으면
+  톤앤매너를 다시 맞춰야 한다.
+- **신규 파일**: `src/screens/sales.js`. **삭제 파일**: `src/screens/home.js`.
+- **변경 파일**: `src/screens/customers.js`(탭바 제거, 설정 아이콘 추가, 영업상태 3단계 배너),
+  `src/screens/menu.js`(진입 경로 변경), `src/screens/settings.js`(영업상태 카드 + 목록 항목
+  전면 재작성), `src/router.js`/`src/main.js`/`src/state/store.js`(탭 개념·`activeTab` 완전
+  제거, 로그인 후 기본 화면을 항상 `customers`로 고정), `src/api/mockApi.js`(`getSalesBreakdown`
+  추가), `src/components/ui.js`(`tabBar()` 삭제, `success`/`warning`/`danger-solid` 버튼 변형과
+  아이콘 3종 추가), `src/styles/tokens.css`/`components.css`(탭바 스타일 삭제, 영업상태 카드/
+  설정 목록/매출 조회 스타일 추가), `index.html`(스크립트 태그 정리).
+
+## STEP 4 — 메뉴 관리(하단 탭 '메뉴')
+
+- **화면 구성**: 상단 가로 카테고리 탭(선택 시 해당 카테고리 메뉴만 필터링) + 메뉴 리스트(품절
+  토글 상시 노출) + 하단 고정 "메뉴 추가" CTA. 우측 상단 아이콘으로 **카테고리 관리** 바텀시트
+  진입(추가 / 이름 수정 / 숨김·표시 / 삭제 / 위·아래 순서 이동).
+- **카테고리 삭제 규칙**: 연결된(삭제되지 않은) 메뉴가 있으면 실제 삭제 대신 자동으로 **숨김**
+  처리하고, 연결된 메뉴가 없으면 진짜로 삭제한다. 숨겨진 카테고리는 상단 탭에서 빠지지만
+  카테고리 관리 화면에서는 계속 보이고 "표시"로 되돌릴 수 있다. (직접 테스트: 메뉴가 연결된
+  카테고리 삭제 시도 → 숨김 처리됨 확인 / 메뉴가 없는 카테고리 삭제 → 실제 삭제됨 확인)
+- **품절 토글 + 되돌리기**: 원터치로 품절/판매재개 전환, 즉시 하단 스낵바("품절 처리했습니다 ·
+  되돌리기")를 3초간 노출하고 눌러서 되돌릴 수 있다(`UI.showToast`에 액션 버튼 옵션 추가).
+- **메뉴 등록/수정 폼**: 메뉴명(필수·30자)/카테고리(필수, 카테고리가 하나도 없으면 select
+  비활성화 + 메뉴 추가 버튼도 비활성화)/가격(필수·0 이상 숫자)/설명(선택·200자)/대표 이미지
+  (URL 입력 또는 파일 선택 시 `FileReader`로 즉시 미리보기, 실제 업로드 서버는 없음)/옵션 그룹
+  (그룹 단위로 필수·단일선택 또는 선택·복수선택 지정, 그룹당 옵션 항목 + 추가금액)/노출 여부.
+  필수값이 비면 저장 버튼이 자동으로 비활성화된다(타이핑할 때마다 재검증, 텍스트 입력 포커스는
+  유지한 채 미리보기 영역만 갱신하도록 구현).
+- **고객 미리보기**: 폼을 채우는 동안 실시간으로 "고객이 보게 될 카드"(이미지/이름/가격/설명/
+  옵션 그룹+옵션 칩)를 렌더링해서 저장 전에 확인할 수 있다.
+- **소프트 삭제 + 스냅샷 검증**: 메뉴 삭제는 `isDeleted` 플래그만 세우는 소프트 삭제이며 목록
+  API(`getMenuItems`)에서 자동으로 제외된다. **실제로 STEP2~3에서 만든 과거 주문이 참조하는
+  "아메리카노"의 가격을 5,200원으로 수정 → 삭제까지 해봤고, 그때마다 과거 주문(`order-4`,
+  `order-6`)의 `OrderItem.menuName`/`unitPrice`는 4,500원 그대로 유지됨을 API와 실제 화면(고객
+  탭 펼쳐보기) 양쪽에서 확인했다.** (스냅샷 구조는 STEP1부터 이미 갖춰져 있었고, 이번 단계는
+  이를 깨지 않았는지 검증만 했다 — 별도 보완 불필요.)
+- **저장 실패 방지**: 필수값 미입력 시 저장 버튼 비활성화 + 방어적으로 저장 시도 시에도 에러
+  메시지 노출(`#menu-form-error`).
+- **신규 파일**: `src/screens/menu.js`. **삭제 파일**: `src/screens/placeholder.js`(플레이스홀더
+  화면이 더 이상 필요 없어짐 — 4개 탭 모두 실제 화면으로 채워짐).
+- **변경 파일**: `src/data/mockData.js`(`MenuCategory.isHidden`, `MenuItem.isDeleted`/
+  `optionGroups` 필드 추가), `src/api/mockApi.js`(카테고리/메뉴 CRUD 함수 8종 추가,
+  `localStorage` 스키마 버전 `v3`→`v4`), `src/components/ui.js`(`showToast`에 액션 버튼 옵션,
+  `toggle`에 커스텀 속성 옵션, `confirmModalHtml` 공용 확인 모달 추가), `src/styles/components.css`
+  (메뉴 카드/카테고리 관리/옵션 그룹 편집기/고객 미리보기 카드 스타일 추가), `index.html`
+  (스크립트 태그 교체).
+
+## STEP 3 — '주문' + '고객' 탭을 '고객' 탭 하나로 병합
+
+- **탭 구조 변경**: 지시에 따라 하단 탭이 `홈 / 주문 / 고객 / 메뉴`(4개) →
+  **`홈 / 고객 / 메뉴`(3개)** 로 줄었습니다. STEP2의 `src/screens/orders.js`는 삭제하고,
+  그 기능(상태별 세그먼트 탭, 실시간 반영)을 `src/screens/customers.js` 하나로 합쳤습니다.
+  두 화면이 같은 주문 데이터를 다른 관점으로 보여주는 것이었으므로, 병합 후에도
+  `MockApi.getOrders()` / `'mock:orders-changed'` 이벤트라는 단일 데이터 원본은 그대로입니다.
+  (참고: 지시문 중간에 "하단 탭 '주문'"이라는 표현이 남아있었는데, 최상단에 명시된 "두 탭을
+  '고객'탭으로 합쳐야 해"를 기준으로 판단해 최종 탭 이름은 **고객**으로 정했습니다. 의도와
+  다르면 말씀해주세요.)
+- **주문 카드 UI 변경**: 팝업(바텀시트) 상세 대신 카드 내부 **펼쳐보기(아코디언)**로 변경했고,
+  호출하기/완료 처리/주문 취소 3개 버튼을 카드에 **항상 노출**(상태에 따라 `disabled`만 전환)
+  하도록 바꿨습니다. 카드에 고객 핸드폰 번호(마스킹 `010-****-1234`, 펼쳐보기에서 전체 노출)와
+  PG 주문번호를 추가했습니다.
+- **PG 주문번호(`pgOrderNo`)**: "실제로는 PG사 주문번호 API 연동으로 채워질 값"이라는 지시에
+  따라 `Order`에 필드를 추가하고, 지금은 `PG-YYYYMMDD-000123` 형식의 목업 값으로 채웠습니다.
+  기존 `orderNo`(내부 짧은 순번, 배너 등에 사용)는 그대로 유지했습니다.
+- **시간대 그룹핑**: 각 세그먼트 탭 내부를 주문 시각 오름차순으로 정렬한 뒤 **5분 단위**로
+  묶어 구간 헤더("오전 10:50 ~ 10:55 · 3건")를 보여줍니다. STEP2에서 탭별로 달랐던 정렬 기준
+  (경과시간/준비완료시각/최신순)은 이번 지시("기본 정렬은 주문 시각 오름차순")에 맞춰
+  **모든 세그먼트가 주문 시각 오름차순으로 통일**되도록 변경했습니다.
+- **완료 탭에서도 취소 가능**: `MockApi.cancelOrder`의 제약을 완화해 이제 `CANCELED` 상태만
+  재취소를 막고, `COMPLETED` 상태에서도 취소할 수 있게 했습니다(STEP2까지는 완료 후 취소가
+  불가능했던 규칙을 이번 지시로 변경).
+- **카카오 알림톡 호출**: `MockApi.sendKakaoAlert(orderId)` 추가 — 90%/10% 확률로 성공/실패,
+  실패해도 기술적 오류가 아니라 정상 응답(`{success:false}`)으로 처리해 화면에서 "발송 실패" +
+  "다시 보내기" 버튼으로 바로 이어지게 했습니다. 이미 `CALLED` 상태에서 다시 누르면
+  "이미 호출된 고객입니다. 다시 호출할까요?" 확인 모달 후 재발송합니다. 발송 이력은
+  `NotificationLog`(STEP1부터 있던 모델)에 누적되고, 카드 펼쳐보기에서 최신순으로 볼 수
+  있습니다. 발송 문구 미리보기는 `MockApi.buildKakaoMessage(orderId)`(지연 없는 순수 함수)로
+  항상 펼쳐보기 안에서 확인 가능합니다.
+- **주문 진행 상태와 호출 상태는 별개 축**: `Order.status`(RECEIVED/READY/COMPLETED/CANCELED)와
+  `Order.callStatus`(NOT_CALLED/CALLED/FAILED)를 분리했습니다. 호출 버튼은 `status==='READY'`
+  일 때만 활성화됩니다.
+- **신규 파일**: `src/screens/customers.js`. **삭제 파일**: `src/screens/orders.js`(기능이
+  customers.js로 흡수됨).
+- **변경 파일**: `src/data/mockData.js`(`pgOrderNo`/`callStatus`/`calledAt` 필드 추가),
+  `src/api/mockApi.js`(`sendKakaoAlert`/`buildKakaoMessage` 추가, `cancelOrder` 제약 완화,
+  `localStorage` 스키마 버전 `v2`→`v3`), `src/components/ui.js`(하단 탭에서 `orders` 제거),
+  `src/router.js`(유효 탭 목록에서 `orders` 제거), `src/screens/placeholder.js`(`customers`
+  플레이스홀더 제거, `menu`만 유지), `src/styles/components.css`(카드 액션 버튼 행/펼쳐보기/
+  시간대 헤더/버튼 `disabled` 스타일 추가), `index.html`(스크립트 태그 교체).
+
+## STEP 2 — 주문 수신함(하단 탭 '주문') 추가 사항
+
+- **주문 상태 모델 변경**: STEP 1에서 잠정 정의했던 `RECEIVED|ACCEPTED|COOKING|READY|COMPLETED|CANCELED`
+  6단계를 이번 STEP 2 요구사항에 맞춰 **`RECEIVED(접수) → READY(호출) → COMPLETED(완료)` +
+  `CANCELED(취소)`** 4개 상태로 단순화했습니다. `RECEIVED`에서 `READY`를 건너뛰고 바로
+  `COMPLETED`로 처리하는 것도 허용됩니다(정방향 이동이면 단계 스킵 가능, 역방향/동일 상태로의
+  전이는 서버(mockApi)에서 거부). 이미 로컬에 저장된 STEP 1 목업 DB와 스키마가 달라져
+  `localStorage` 키를 `sajang-app-mock-db-v1` → `v2`로 올렸습니다(자동으로 새 시드로 재생성됨).
+- **신규 파일**: `src/screens/orders.js`(주문 수신함 화면), `src/services/orderSimulator.js`
+  (5~15초 간격 무작위 신규 주문 시뮬레이터).
+- **변경 파일**: `src/data/mockData.js`(주문 상태값/orderNo/canceledAt 필드 추가),
+  `src/api/mockApi.js`(`advanceOrderStatus`/`cancelOrder`/`createRandomOrder` 추가 및 이벤트 발행),
+  `src/components/ui.js`(`showBanner`/`segmentTabs`/닫기 아이콘 추가), `src/styles/components.css`
+  (주문 카드/모달/배너 스타일 추가), `src/router.js`(화면 전환 시 `unmount()` 훅 지원),
+  `index.html`(Pretendard 웹폰트 실제 로드, 배너 호스트, 신규 스크립트 연결).
+- **폰트**: `index.html`에 Pretendard Variable 웹폰트(CDN)를 실제로 로드하도록 추가했습니다.
+  브라우저 콘솔에서 `document.fonts` 확인 결과 `Pretendard Variable ... loaded` 상태로 전체
+  화면에 정상 적용됨을 확인했습니다.
+
+## ⚠️ 이번 단계에서 스택을 바꾼 이유
+
+원래 계획은 **Expo + React Native + TypeScript** 네이티브 앱이었지만, 이 작업을 실행한
+컴퓨터에 **Node.js가 설치되어 있지 않아** Expo 프로젝트를 생성/실행/검증할 수 없었습니다.
+사용자 확인 결과 이번 결과물은 "개발자에게 보여줄 목업" 용도이므로, **순수 HTML/CSS/
+바닐라 JS**로 동일한 화면 구조·디자인 시스템·데이터 모델·API 계층 분리를 그대로 재현했습니다.
+
+- Node.js/npm이 없어도 브라우저에서 바로 열립니다 (빌드 단계 없음).
+- 폴더 구조, 컴포넌트 이름, API 함수 시그니처, 데이터 모델은 **실제 Expo 프로젝트로
+  옮길 때 거의 그대로 재사용**할 수 있도록 설계했습니다. (아래 "실제 Expo 프로젝트 전환 방법" 참고)
+- Node.js가 설치되면 이 문서의 안내에 따라 실제 RN 프로젝트로 옮기는 걸 권장합니다.
+
+## 실행 방법
+
+Node.js 없이 정적 파일만으로 동작하므로, 아래 둘 중 하나로 열면 됩니다.
+
+1. **가장 간단히**: `index.html` 파일을 더블클릭해서 브라우저로 바로 엽니다.
+2. **로컬 서버로(권장, 새로고침 시 상태 유지 등 실제 앱과 더 비슷하게 동작)**:
+   - PowerShell에서 `server.ps1`을 실행합니다.
+     ```powershell
+     powershell -NoProfile -ExecutionPolicy Bypass -File .\server.ps1 -Port 8935
+     ```
+   - 브라우저에서 `http://localhost:8935` 접속.
+
+데모 로그인 계정: **아이디 `owner` / 비밀번호 `1234`** (로그인 화면에 미리 채워져 있음)
+
+## 확인된 동작 (완료 조건)
+
+- 로그인 → 홈 화면 → 하단 탭(홈/주문/고객/메뉴) 전환 → 설정 → 로그아웃까지 정상 동작 확인.
+- 매장이 1곳만 시드되어 있어 로그인 직후 매장 선택 화면은 자동 스킵되고 바로 홈으로 이동.
+  (매장 선택 화면 로직 자체를 보고 싶다면 `index.html?forceStoreSelect=1` 로 접속)
+- 홈 화면 영업상태 토글 ON/OFF, 오늘 매출/주문건수/대기 고객 수 요약 카드가 목업 주문
+  데이터로부터 계산되어 표시됨.
+- 디자인 시스템(블랙앤화이트 + 예외적 포인트 레드)이 로그인/홈/설정/탭바 전반에 적용됨.
+
+## 폴더 구조
+
+```
+사장님관리자앱/
+├─ index.html                 # 앱 진입점 (전체 화면을 이 안의 #app-root에 그려넣음)
+├─ server.ps1                 # Node 없이 정적 파일을 서빙하기 위한 PowerShell 서버 (선택)
+├─ README.md
+└─ src/
+   ├─ styles/
+   │  ├─ tokens.css           # 컬러/타이포/spacing 디자인 토큰
+   │  ├─ base.css             # 리셋 + 폰 프레임 레이아웃
+   │  └─ components.css       # 공용 컴포넌트 스타일(Button/Card/Badge/Toggle/TabBar 등)
+   ├─ data/
+   │  └─ mockData.js          # 시드 데이터 (Store/User/MenuCategory/MenuItem/Order/OrderItem/NotificationLog)
+   ├─ api/
+   │  └─ mockApi.js           # 목업 API 계층 — 화면은 이 함수만 호출 (교체 지점, 아래 참고)
+   ├─ state/
+   │  └─ store.js             # 전역 상태 (로그인 유저/선택 매장/활성 탭), localStorage로 세션 유지
+   ├─ components/
+   │  └─ ui.js                # 공용 컴포넌트 렌더 함수 (button/badge/toggle/tabBar/topBar/toast)
+   ├─ screens/
+   │  ├─ login.js              # 로그인 화면
+   │  ├─ storeSelect.js        # 매장 선택 화면 (매장 1곳이면 자동 스킵)
+   │  ├─ home.js                # 홈(대시보드) 화면
+   │  ├─ placeholder.js         # 주문/고객/메뉴 탭 "추후 개발 예정" 플레이스홀더 3종
+   │  └─ settings.js            # 설정 화면
+   ├─ router.js                # #app-root 안에서 화면 전환을 담당하는 초경량 라우터
+   └─ main.js                   # 부트스트랩 (로그인/매장선택 여부에 따라 시작 화면 결정)
+```
+
+## 디자인 시스템 (공용 컴포넌트)
+
+`src/components/ui.js` + `src/styles/components.css` 에 정의되어 있고, 모든 화면이 이걸
+재사용합니다. 다음 단계(주문 수신함 등)에서도 반드시 이 컴포넌트를 재사용해야 합니다.
+
+| 컴포넌트 | 함수/클래스 | 비고 |
+|---|---|---|
+| Button | `UI.button({label, action, variant})` / `.btn-primary` 등 | variant: primary/secondary/outline/text/danger-text |
+| Card | `.card`, `.card-list-item`, `.summary-card` | 대시보드 요약 카드 포함 |
+| Badge | `UI.badge(label, variant)` | variant: neutral/dark/danger/danger-soft — **danger 계열은 신규/품절/취소/오류에만 사용** |
+| Toggle | `UI.toggle(isOn, action)` / `.toggle` | 영업상태 ON/OFF 등 |
+| TabBar(하단) | `UI.tabBar(activeTab)` / `.tabbar` | 홈/주문/고객/메뉴 |
+| SegmentTab(상단, 다음 단계용) | `.segment-tabs`, `.segment-tab` | 주문 탭의 대기/호출/완료 등 상태 탭에서 재사용 예정 |
+| TopBar | `UI.topBar({title, leftIcon, leftAction, rightIcon, rightAction})` | 좌상단 설정 아이콘, 뒤로가기 등 |
+| Toast | `UI.showToast(message)` | 하단 CTA 위에 잠깐 표시 |
+
+컬러 토큰(`src/styles/tokens.css`): `--color-text-primary(#111111)`, `--color-bg(#fff)`,
+`--color-divider(#F2F3F5)`, `--color-disabled(#E5E8EB)`, `--color-text-secondary(#8B95A1)`,
+`--color-accent-red(#E5484D, 신규/품절/취소/오류 전용)`. 폰트는 Pretendard를 우선 지정하고
+시스템 폰트로 폴백(`--font-family-base`) — 실제 앱에서는 `expo-font`로 Pretendard 폰트
+파일을 번들에 포함시키면 됩니다.
+
+## 목업 API 엔드포인트 (`src/api/mockApi.js`)
+
+화면 코드는 아래 함수만 호출합니다. 실제 백엔드가 정해지면 **함수 시그니처는 그대로 두고
+함수 본문만 fetch 호출로 교체**하면 화면 코드는 손댈 필요가 없습니다.
+
+| 함수 | 예정 REST 엔드포인트 |
+|---|---|
+| `MockApi.login(loginId, password)` | `POST /auth/login` |
+| `MockApi.getMyStores(userId)` | `GET /users/:userId/stores` |
+| `MockApi.getStore(storeId)` | `GET /stores/:storeId` |
+| `MockApi.updateStoreOperatingStatus(storeId, status)` | `PATCH /stores/:storeId/operating-status` |
+| `MockApi.getDashboardSummary(storeId)` | `GET /stores/:storeId/dashboard-summary` |
+| `MockApi.getMenuCategories(storeId)` | `GET /stores/:storeId/menu-categories` |
+| `MockApi.getMenuItems(storeId)` | `GET /stores/:storeId/menu-items` |
+| `MockApi.getOrders(storeId)` | `GET /stores/:storeId/orders` |
+| `MockApi.getNotificationLogs(storeId)` | `GET /stores/:storeId/notification-logs` |
+| `MockApi.resetSeed()` | (개발용) 시드 데이터로 초기화 |
+
+목업 DB는 `localStorage`(`sajang-app-mock-db-v1`)에 저장되어, 새로고침해도 영업상태
+토글 등 변경 사항이 유지됩니다. 완전히 초기 상태로 되돌리려면 브라우저 개발자도구
+콘솔에서 `localStorage.clear()` 후 새로고침하세요.
+
+## 시드 데이터
+
+- 매장 1곳: 브루웍스 성수점 (`store-1`)
+- 로그인 계정: 오너 1명 (`owner` / `1234`)
+- 메뉴 카테고리 3개(커피/논커피/디저트), 메뉴 7개(품절 1개 포함)
+- 주문 6건 (RECEIVED/COOKING/READY/COMPLETED/CANCELED 상태 각각 포함, 취소 사유 예시 포함)
+- 알림 로그 2건 (카톡 알림 성공/실패 예시)
+
+데이터 모델 필드는 PRD 기준 그대로입니다 (`src/data/mockData.js` 상단 주석 참고).
+
+---
+
+## 실제 Expo(React Native + TypeScript) 프로젝트로 전환하는 방법
+
+Node.js 설치 후, 아래 순서로 이 목업을 실제 네이티브 프로젝트로 옮기는 것을 권장합니다.
+
+1. **프로젝트 생성**
+   ```bash
+   npx create-expo-app@latest sajangnim-admin-app -t expo-template-blank-typescript
+   cd sajangnim-admin-app
+   npm install zustand @tanstack/react-query @react-navigation/native @react-navigation/native-stack @react-navigation/bottom-tabs
+   npx expo install react-native-screens react-native-safe-area-context expo-font
+   ```
+2. **상태관리 선택 이유**
+   - **Zustand**: 로그인 유저/선택 매장/영업상태처럼 앱 전역에서 읽고 쓰는 가벼운 상태에 적합 (이 목업의 `src/state/store.js`가 Zustand `create()` 시그니처로 바로 옮길 수 있게 설계되어 있음).
+   - **React Query**: 주문/메뉴 목록처럼 서버(목업 API 포함) 데이터를 가져오고 캐싱·리프레시해야 하는 부분에 적합. `src/api/mockApi.js`의 각 함수를 그대로 `queryFn`으로 감싸면 됨.
+3. **폴더 구조 매핑**
+   - `src/screens/*.js` → `features/{auth,home,orders,customers,menu,settings}/screens/*.tsx`
+   - `src/components/ui.js` → `shared/components/{Button,Card,Badge,Toggle,TabBar,TopBar,Toast}.tsx`
+   - `src/api/mockApi.js` → `shared/api/mockApi.ts` (json-server로 교체 시 `shared/api/client.ts`에서 baseURL만 바꾸는 구조 권장)
+   - `src/data/mockData.js` → `shared/api/mock/seed.json` (json-server의 `db.json`으로 사용 가능)
+   - `src/styles/tokens.css` → `shared/theme/tokens.ts`
+4. **목업 API 서버**: Node 사용 가능 환경에서는 `json-server`로 교체 권장.
+   ```bash
+   npm install -D json-server
+   npx json-server --watch shared/api/mock/seed.json --port 4000
+   ```
+   이후 `mockApi.ts` 내부를 `fetch('http://localhost:4000/...')`로 교체.
+5. **네비게이션**: `router.js`(초경량 라우터) → `@react-navigation`의 `NativeStackNavigator`(로그인/매장선택/설정) +
+   `BottomTabNavigator`(홈/주문/고객/메뉴)로 교체.
+6. **폰트**: Pretendard 폰트 파일(otf/ttf)을 `assets/fonts/`에 넣고 `expo-font`의 `useFonts`로 로드.
+
+## 다음 단계
+
+STEP 2(주문 수신 POS)부터는 이 프로젝트의 `MockApi.getOrders`, 주문 상태값
+(`RECEIVED|ACCEPTED|COOKING|READY|COMPLETED|CANCELED`), 그리고 `UI.badge` / `.segment-tabs`
+컴포넌트를 그대로 재사용해서 주문 탭(`src/screens/placeholder.js`의 `orders` 부분)을
+실제 기능으로 채우면 됩니다.

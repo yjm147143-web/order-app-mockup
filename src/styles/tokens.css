@@ -1,0 +1,41 @@
+/*
+ * 디자인 토큰 (Toss 스타일 — 블랙앤화이트 기본 + 예외적 포인트 레드)
+ * 실제 Expo 프로젝트로 이전 시: theme/tokens.ts 로 그대로 옮기면 됨.
+ */
+:root {
+  /* Color */
+  --color-text-primary: #111111;   /* 기본 텍스트 / 버튼 배경 */
+  --color-bg: #ffffff;             /* 기본 배경 */
+  --color-divider: #f2f3f5;        /* 구분선 / 카드 배경(연한 회색) */
+  --color-disabled: #e5e8eb;       /* 비활성 배경 */
+  --color-text-secondary: #8b95a1; /* 보조 텍스트 */
+  --color-accent-red: #e5484d;     /* 신규/품절/취소/오류 전용 포인트 컬러 */
+  --color-accent-red-bg: #fdecec;  /* 레드 배지/배너의 옅은 배경 */
+  --color-accent-green: #12b76a;   /* 영업상태(개점/영업중) 전용 — 요청에 따른 예외적 색상 사용 */
+  --color-accent-amber: #f5a623;   /* 영업상태(일시중지) 전용 — 요청에 따른 예외적 색상 사용 */
+  --color-white: #ffffff;
+
+  /* Typography */
+  --font-family-base: 'Pretendard Variable', Pretendard, -apple-system, BlinkMacSystemFont,
+    'Segoe UI', Roboto, 'Apple SD Gothic Neo', 'Malgun Gothic', sans-serif;
+  --font-size-display: 32px;  /* 대시보드 큰 숫자 */
+  --font-size-title: 22px;    /* 화면 타이틀 */
+  --font-size-subtitle: 17px;
+  --font-size-body: 15px;
+  --font-size-caption: 13px;
+
+  /* Radius / Spacing */
+  --radius-card: 16px;
+  --radius-button: 14px;
+  --radius-pill: 999px;
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+  --space-8: 32px;
+
+  /* Layout */
+  --cta-height: 56px;
+}
