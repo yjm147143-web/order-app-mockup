@@ -117,26 +117,7 @@
     root.querySelector('#sales-total').textContent = UI.formatWon(data.totalAmount);
     root.querySelector('#sales-order-count').textContent = '주문 ' + data.orderCount + '건 기준';
     root.querySelector('#sales-chart-host').innerHTML = UI.salesChartHtml(currentDimension, data);
-    var listEl = root.querySelector('#sales-breakdown-list');
-    if (data.rows.length === 0) {
-      listEl.innerHTML = '<div class="center-empty" style="padding-top:40px;"><div class="emoji">🗂️</div><div class="title">해당 기간의 매출이 없어요</div></div>';
-      return;
-    }
-    listEl.innerHTML =
-      '<div class="card">' +
-      data.rows
-        .map(function (row, idx) {
-          var pct = data.totalAmount > 0 ? Math.round((row.amount / data.totalAmount) * 100) : 0;
-          return (
-            '<div class="sales-breakdown-row">' +
-              '<span class="sales-breakdown-rank">' + (idx + 1) + '</span>' +
-              '<span class="sales-breakdown-label">' + UI.escapeHtml(row.label) + (row.sub ? '<div class="sales-breakdown-sub">' + UI.escapeHtml(row.sub) + '</div>' : '') + '</span>' +
-              '<span class="sales-breakdown-amount">' + UI.formatWon(row.amount) + ' <span class="sales-breakdown-sub">(' + pct + '%)</span></span>' +
-            '</div>'
-          );
-        })
-        .join('') +
-      '</div>';
+    root.querySelector('#sales-breakdown-list').innerHTML = UI.breakdownListHtml(data, '해당 기간의 매출이 없어요');
   }
 
   function mount(root) {

@@ -77,8 +77,9 @@
       '<div class="order-card ' + (isCanceled ? 'canceled' : '') + '" data-action="open-order-detail" data-order-id="' + order.id + '">' +
         '<div class="order-card-header-row">' +
           UI.channelBadgeHtml(order) +
-          '<span class="order-card-pgno">' + UI.escapeHtml(order.pgOrderNo) + '</span>' +
+          UI.orderTypeBadgeHtml(order) +
         '</div>' +
+        '<div class="order-card-pgno-row">' + UI.escapeHtml(order.pgOrderNo) + '</div>' +
         '<div class="order-card-main">' +
           '<div class="order-card-content-row">' +
             '<div class="order-card-menu-main">' + UI.escapeHtml(menuSummary(order.id)) + '</div>' +

@@ -8,7 +8,8 @@
   --color-bg: #ffffff;             /* 기본 배경 */
   --color-divider: #f2f3f5;        /* 구분선 / 카드 배경(연한 회색) */
   --color-disabled: #e5e8eb;       /* 비활성 배경 */
-  --color-text-secondary: #8b95a1; /* 보조 텍스트 */
+  --color-text-secondary: #6b7684; /* 보조 텍스트 — 흰/연회색 배경에서 WCAG AA(4.5:1) 대비를 만족하도록
+    #8b95a1에서 조정(디자인 리뷰 발견 사항). */
   --color-accent-red: #e5484d;     /* 신규/품절/취소/오류 전용 포인트 컬러 */
   --color-accent-red-bg: #fdecec;  /* 레드 배지/배너의 옅은 배경 */
   --color-accent-green: #12b76a;   /* 영업상태(개점/영업중) 전용 — 요청에 따른 예외적 색상 사용 */

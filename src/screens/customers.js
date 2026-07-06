@@ -7,8 +7,9 @@
  * 상단 세그먼트 탭: 대기(WAITING) / 접수(RECEIVED) / 완료(COMPLETED+CANCELED)
  * 각 탭 내부는 주문 시각 오름차순으로 정렬한 뒤 5분 단위 시간대로 묶어서 보여준다.
  *
- * ⚠️ 정책 완화 안내: '고객 호출' 버튼은 접수(RECEIVED)/완료 탭에서는 상태와 무관하게 몇 번이든
- * 눌릴 수 있다(대기 탭에서는 아직 수락 전이라 호출 버튼 자체가 없다 — 먼저 '주문 수락'을 눌러야 한다).
+ * ⚠️ 정책 안내: '고객 호출' 버튼은 접수(RECEIVED) 탭에서만 노출되며, 상태와 무관하게 몇 번이든
+ * 눌릴 수 있다(대기 탭에서는 아직 수락 전이라 호출 버튼 자체가 없다 — 먼저 '주문 수락'을 눌러야 한다.
+ * 완료 탭에서는 이미 조리/픽업이 끝난 주문이므로 호출 버튼을 두지 않는다).
  * 카카오 알림 문구(MockApi.buildKakaoMessage)는 여전히 "준비되었습니다"로 고정되어 있어, 접수 단계에서
  * 미리 호출하면 실제 상태와 문구가 어긋날 수 있다는 점을 감안해야 한다(문구 자체는 이번 요청 범위가
  * 아니라 그대로 두었다).
@@ -41,8 +42,8 @@
   var logsCache = [];
   var selectedCancelReason = null;
   var customCancelReasonText = '';
-  var searchOpen = false;
   var searchQuery = '';
+  var menuFilterBySegment = { WAITING: 'ALL', RECEIVED: 'ALL', DONE: 'ALL' };
   var currentUnmount = null;
 
   function itemsOf(orderId) {
@@ -91,7 +92,7 @@
     }
     if (segment === 'DONE') {
       var revertBtn = { label: '되돌리기', action: 'revert-btn', variant: 'outline', disabled: offline || order.status !== 'COMPLETED' };
-      return [callBtn, revertBtn, cancelBtn];
+      return [revertBtn, cancelBtn];
     }
     // RECEIVED
     var completeBtn = { label: '완료 처리', action: 'complete-btn', variant: 'success', disabled: offline || order.status === 'COMPLETED' || order.status === 'CANCELED' };
@@ -99,14 +100,27 @@
   }
 
   function render() {
+    var user = AppState.get().currentUser;
+    var accountLabel = user && user.role === 'OWNER' ? '관리자 계정' : '직원 계정';
     return (
       '<div class="screen">' +
-        UI.topBar({ title: '주문', rightIcon: UI.Icons.settings, rightAction: 'go-settings' }) +
-        '<div id="order-info-bar-host"></div>' +
-        '<div id="order-search-host"></div>' +
+        '<div class="topbar">' +
+          '<span id="order-status-pill-host"></span>' +
+          '<span class="topbar-title">주문</span>' +
+          '<button class="icon-btn" data-action="go-settings">' + UI.Icons.settings + '</button>' +
+        '</div>' +
+        '<div class="order-search-row">' +
+          '<span class="search-icon">🔍</span>' +
+          '<input id="pickup-search-input" placeholder="픽업번호/테이블번호로 검색" />' +
+        '</div>' +
+        '<div class="order-toolbar">' +
+          '<span class="order-account-type">' + UI.escapeHtml(accountLabel) + '</span>' +
+          '<button class="btn-text-sm" data-action="toggle-expand-all">전체 접기</button>' +
+        '</div>' +
         '<div id="offline-banner-host"></div>' +
         '<div id="closed-banner-host"></div>' +
         '<div id="segment-tabs-host"></div>' +
+        '<div id="order-menu-filter-host"></div>' +
         '<div class="screen-scroll"><div class="order-list" id="order-list"></div></div>' +
         '<div id="customer-modal-host"></div>' +
       '</div>'
@@ -161,16 +175,17 @@
           '<label class="order-checkbox-label"><input type="checkbox" class="order-select-checkbox" data-order-id="' + order.id + '" ' +
             (selectedIds[order.id] ? 'checked' : '') + ' /></label>' +
           UI.channelBadgeHtml(order) +
-          '<span class="order-card-pgno">' + UI.escapeHtml(order.pgOrderNo) + '</span>' +
+          UI.orderTypeBadgeHtml(order) +
         '</div>' +
+        '<div class="order-card-pgno-row">' + UI.escapeHtml(order.pgOrderNo) + '</div>' +
         '<div class="order-card-main" data-action="toggle-expand" data-order-id="' + order.id + '">' +
           '<div class="order-card-content-row">' +
             '<div class="order-card-menu-main">' + UI.escapeHtml(menuSummary(order.id)) + '</div>' +
             UI.pickupBlockHtml(order) +
           '</div>' +
+          '<div class="order-card-time-emphasized">' + UI.clockLabel24(order.orderedAt) + ' · ' + UI.elapsedLabel(order.orderedAt) + '</div>' +
           UI.phoneRowHtml(order) +
-          '<div class="order-card-time">' + UI.clockLabel(order.orderedAt) + ' 주문 · ' + UI.timeAgoLabel(order.orderedAt) + '</div>' +
-          '<div class="order-card-amount">' + UI.formatWon(order.totalAmount) + '</div>' +
+          '<div class="order-card-amount">' + UI.formatWon(order.totalAmount) + ' · ' + UI.escapeHtml(order.paymentMethod || '-') + '</div>' +
           (isCanceled ? '<div class="order-card-cancel-reason">취소 사유: ' + UI.escapeHtml(order.cancelReason || '-') + '</div>' : '') +
         '</div>' +
         '<div class="order-card-actions">' +
@@ -195,8 +210,8 @@
     selectedIds = {};
     groupCollapsed = {};
     allExpandedIntent = true;
-    searchOpen = false;
     searchQuery = '';
+    menuFilterBySegment = { WAITING: 'ALL', RECEIVED: 'ALL', DONE: 'ALL' };
     var refreshTimer = null;
     var storeCache = null;
     var hasLoadedOnce = false;
@@ -205,21 +220,76 @@
       Router.showScreen('settings');
     });
 
+    var searchInput = root.querySelector('#pickup-search-input');
+    searchInput.addEventListener('input', function () {
+      searchQuery = searchInput.value;
+      renderList();
+    });
+
+    var expandAllBtn = root.querySelector('[data-action="toggle-expand-all"]');
+    expandAllBtn.addEventListener('click', function () {
+      allExpandedIntent = !allExpandedIntent;
+      if (allExpandedIntent) {
+        groupCollapsed = {};
+      } else {
+        getGroupsForActiveSegment().forEach(function (g) {
+          groupCollapsed[g.key] = true;
+        });
+      }
+      expandAllBtn.textContent = allExpandedIntent ? '전체 접기' : '전체 펼치기';
+      renderList();
+    });
+
     function matchesSearch(order) {
       if (!searchQuery) return true;
       var pickup = (order.tableOrPickupNo || '').toString();
       return pickup.indexOf(searchQuery.trim()) !== -1;
     }
 
+    function matchesMenuFilter(order) {
+      var filterVal = menuFilterBySegment[activeSegment] || 'ALL';
+      if (filterVal === 'ALL') return true;
+      return itemsOf(order.id).some(function (it) {
+        return it.menuName === filterVal;
+      });
+    }
+
     function getGroupsForActiveSegment() {
       var filtered = ordersCache.filter(function (o) {
-        return segmentOf(o) === activeSegment && matchesSearch(o);
+        return segmentOf(o) === activeSegment && matchesSearch(o) && matchesMenuFilter(o);
       });
       // 기본 정렬은 주문 시각 오름차순(먼저 주문한 고객이 위)
       var sorted = filtered.slice().sort(function (a, b) {
         return new Date(a.orderedAt) - new Date(b.orderedAt);
       });
       return UI.groupByBucket(sorted);
+    }
+
+    function renderMenuFilter() {
+      var host = root.querySelector('#order-menu-filter-host');
+      var menuNames = Array.from(
+        new Set(itemsCache.map(function (it) { return it.menuName; }))
+      ).sort();
+      if (menuNames.length === 0) {
+        host.innerHTML = '';
+        return;
+      }
+      var currentVal = menuFilterBySegment[activeSegment] || 'ALL';
+      host.innerHTML =
+        '<div class="order-menu-filter-row">' +
+          '<select id="order-menu-filter-select" class="input-field">' +
+            '<option value="ALL">전체 메뉴</option>' +
+            menuNames
+              .map(function (name) {
+                return '<option value="' + UI.escapeHtml(name) + '" ' + (name === currentVal ? 'selected' : '') + '>' + UI.escapeHtml(name) + '</option>';
+              })
+              .join('') +
+          '</select>' +
+        '</div>';
+      host.querySelector('#order-menu-filter-select').addEventListener('change', function (e) {
+        menuFilterBySegment[activeSegment] = e.target.value;
+        renderList();
+      });
     }
 
     function renderOfflineBanner() {
@@ -247,75 +317,29 @@
         ordersCache = results[1].orders;
         itemsCache = results[1].orderItems;
         logsCache = results[2].notificationLogs;
-        renderInfoBar();
-        renderSearchRow();
+        renderStatusPill(storeCache.operatingStatus);
         renderClosedBanner(storeCache.operatingStatus);
         renderSegmentTabsAndList();
       });
     }
 
-    function renderInfoBar() {
-      var host = root.querySelector('#order-info-bar-host');
-      var user = AppState.get().currentUser;
-      var accountLabel = user && user.role === 'OWNER' ? '관리자 계정' : '직원 계정';
+    function renderStatusPill(operatingStatus) {
+      var host = root.querySelector('#order-status-pill-host');
       var meta =
         {
           OPEN: { label: '영업 중', dotClass: 'open' },
           PAUSED: { label: '일시중지', dotClass: 'paused' },
           CLOSED: { label: '영업 마감', dotClass: 'closed' },
-        }[storeCache ? storeCache.operatingStatus : ''] || { label: '-', dotClass: '' };
+        }[operatingStatus] || { label: '-', dotClass: '' };
 
       host.innerHTML =
-        '<div class="order-info-bar">' +
-          '<button class="order-status-pill" data-action="go-settings-status">' +
-            '<span class="operating-status-dot ' + meta.dotClass + '"></span>' +
-            '<span>' + meta.label + '</span>' +
-          '</button>' +
-          '<span class="order-account-type">' + UI.escapeHtml(accountLabel) + '</span>' +
-        '</div>' +
-        '<div class="order-toolbar">' +
-          '<button class="icon-btn" data-action="toggle-search">' + UI.Icons.search + '</button>' +
-          '<button class="btn-text-sm" data-action="toggle-expand-all">' + (allExpandedIntent ? '전체 접기' : '전체 펼치기') + '</button>' +
-        '</div>';
+        '<button class="order-status-pill" data-action="go-settings-status">' +
+          '<span class="operating-status-dot ' + meta.dotClass + '"></span>' +
+          '<span>' + meta.label + '</span>' +
+        '</button>';
 
       host.querySelector('[data-action="go-settings-status"]').addEventListener('click', function () {
         Router.showScreen('settings');
-      });
-      host.querySelector('[data-action="toggle-expand-all"]').addEventListener('click', function () {
-        allExpandedIntent = !allExpandedIntent;
-        if (allExpandedIntent) {
-          groupCollapsed = {};
-        } else {
-          getGroupsForActiveSegment().forEach(function (g) {
-            groupCollapsed[g.key] = true;
-          });
-        }
-        renderInfoBar();
-        renderList();
-      });
-      host.querySelector('[data-action="toggle-search"]').addEventListener('click', function () {
-        searchOpen = !searchOpen;
-        if (!searchOpen) searchQuery = '';
-        renderSearchRow();
-        renderList();
-      });
-    }
-
-    function renderSearchRow() {
-      var host = root.querySelector('#order-search-host');
-      if (!searchOpen) {
-        host.innerHTML = '';
-        return;
-      }
-      host.innerHTML =
-        '<div class="order-search-row">' +
-          '<input id="pickup-search-input" placeholder="픽업번호/테이블번호로 검색" value="' + UI.escapeHtml(searchQuery) + '" />' +
-        '</div>';
-      var input = host.querySelector('#pickup-search-input');
-      input.focus();
-      input.addEventListener('input', function () {
-        searchQuery = input.value;
-        renderList();
       });
     }
 
@@ -350,6 +374,7 @@
           renderSegmentTabsAndList();
         });
       });
+      renderMenuFilter();
       renderList();
     }
 
@@ -374,6 +399,9 @@
                 (allSelected ? 'checked' : '') + ' /></label>' +
               '<span class="time-bucket-title" data-action="toggle-group" data-bucket="' + g.key + '">' +
                 UI.bucketLabel(g.key) + ' · ' + g.orders.length + '건' +
+              '</span>' +
+              '<span class="time-bucket-toggle-label" data-action="toggle-group" data-bucket="' + g.key + '">' +
+                '<span>' + (collapsed ? '펼쳐보기' : '접기') + '</span>' +
                 '<svg class="bucket-chevron ' + (collapsed ? '' : 'open') + '" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"/></svg>' +
               '</span>' +
             '</div>';
@@ -512,14 +540,42 @@
     function doSendKakao(orderId) {
       MockApi.sendKakaoAlert(orderId).then(
         function (res) {
-          UI.showToast(res.success ? '고객 호출 알림을 보냈어요' : '발송 실패');
           loadAndRender();
+          if (res.success) {
+            UI.showToast('고객 호출 알림을 보냈어요');
+          } else {
+            openSendFailureModal(orderId);
+          }
         },
         function (err) {
           UI.showToast(err.message || '오류가 발생했습니다');
           loadAndRender();
         }
       );
+    }
+
+    function openSendFailureModal(orderId) {
+      var host = root.querySelector('#customer-modal-host');
+      host.innerHTML =
+        '<div class="modal-overlay" id="send-fail-modal-overlay">' +
+          '<div class="modal-sheet">' +
+            '<div class="modal-sheet-header">' +
+              '<span class="modal-sheet-title">발송 실패</span>' +
+            '</div>' +
+            '<div class="modal-sheet-body"><div class="helper-text" style="text-align:left;">발송이 실패되었습니다</div></div>' +
+            '<div class="modal-sheet-footer">' +
+              UI.button({ label: '다시 발송하기', action: 'retry-send', variant: 'primary' }) +
+              UI.button({ label: '닫기', action: 'close-send-fail', variant: 'outline' }) +
+            '</div>' +
+          '</div>' +
+        '</div>';
+      var overlay = host.querySelector('#send-fail-modal-overlay');
+      overlay.addEventListener('click', function (e) { if (e.target === overlay) closeModal(); });
+      host.querySelector('[data-action="close-send-fail"]').addEventListener('click', closeModal);
+      host.querySelector('[data-action="retry-send"]').addEventListener('click', function () {
+        closeModal();
+        doSendKakao(orderId);
+      });
     }
 
     function onCompleteClick(orderId) {

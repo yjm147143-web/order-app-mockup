@@ -3,8 +3,11 @@
  * 실제 이전 시: features/settings/screens/SettingsScreen.tsx
  *
  * 최상단: 영업상태 카드(CLOSED/OPEN/PAUSED 3단계, 버튼 클릭 시 확인 팝업 후 전환).
- * 그 아래: 매장 정보, 재고 소진 시 자동 품절 토글, 메뉴 추가 및 수정(→ menu 화면),
- * 매출 조회(→ sales 화면), 직원 계정 관리, 로그아웃.
+ * 그 아래: 재고 소진 시 자동 품절 토글, 자동 수락 토글, 예상 대기시간 관리(→ waitTimeSettings 화면),
+ * 메뉴 추가 및 수정(→ menu 화면), 매출 조회(→ sales 화면), 직원 계정 관리(→ staffAccounts 화면),
+ * QR 메뉴판 보기(→ qrMenu 화면), 로그아웃.
+ * 매장 정보 카드는 목록 맨 아래(개발자 옵션 바로 위)에 둔다 — 자주 안 바뀌는 정보라 자주 쓰는
+ * 설정 항목들보다 아래로 내렸다.
  * (카테고리 관리는 여기 두지 않는다 — 메뉴 관리 화면 자체의 상단에 있음. menu.js 참고)
  * 맨 아래: 개발자 옵션(디버그) — 오프라인 시뮬레이션 토글 + 테스트 주문 5건 생성 버튼.
  * AppState.isOffline 은 세션 간 유지되지 않고 새로고침하면 항상 false로 초기화된다
@@ -49,10 +52,6 @@
             '<div class="operating-status-desc" id="operating-status-desc"></div>' +
             '<div class="operating-status-actions" id="operating-status-actions"></div>' +
           '</div>' +
-          '<div class="card" id="store-info-card" style="margin-bottom:16px;">' +
-            '<div style="font-size:13px;color:var(--color-text-secondary);margin-bottom:8px;">매장 정보</div>' +
-            '<div id="store-info-body" style="font-size:15px;line-height:1.7;">불러오는 중...</div>' +
-          '</div>' +
           '<div class="card" style="margin-bottom:16px;">' +
             '<div class="toggle-row">' +
               '<div>' +
@@ -61,6 +60,20 @@
               '</div>' +
               UI.toggle(true, 'toggle-auto-soldout') +
             '</div>' +
+          '</div>' +
+          '<div class="card" style="margin-bottom:16px;">' +
+            '<div class="toggle-row">' +
+              '<div>' +
+                '<div style="font-weight:700;font-size:15px;">자동 수락</div>' +
+                '<div style="font-size:13px;color:var(--color-text-secondary);margin-top:2px;">켜두면 신규 주문이 대기 탭을 거치지 않고 바로 접수 탭으로 들어와요</div>' +
+              '</div>' +
+              UI.toggle(false, 'toggle-auto-accept') +
+            '</div>' +
+          '</div>' +
+          '<div class="settings-list-item" data-action="go-wait-time">' +
+            '<span class="settings-list-icon">' + UI.Icons.clock + '</span>' +
+            '<span class="settings-list-label">예상 대기시간 관리</span>' +
+            '<span class="settings-list-chevron">' + UI.Icons.chevronRight + '</span>' +
           '</div>' +
           '<div class="settings-list-item" data-action="go-menu">' +
             '<span class="settings-list-icon">' + UI.Icons.menu + '</span>' +
@@ -72,14 +85,23 @@
             '<span class="settings-list-label">매출 조회</span>' +
             '<span class="settings-list-chevron">' + UI.Icons.chevronRight + '</span>' +
           '</div>' +
-          '<div class="settings-list-item" data-action="noop">' +
+          '<div class="settings-list-item" data-action="go-staff">' +
             '<span class="settings-list-icon">' + UI.Icons.customers + '</span>' +
             '<span class="settings-list-label">직원 계정 관리</span>' +
-            UI.badge('다음 단계 예정', 'neutral') +
+            '<span class="settings-list-chevron">' + UI.Icons.chevronRight + '</span>' +
+          '</div>' +
+          '<div class="settings-list-item" data-action="go-qr-menu">' +
+            '<span class="settings-list-icon">' + UI.Icons.qr + '</span>' +
+            '<span class="settings-list-label">QR 메뉴판 보기</span>' +
+            '<span class="settings-list-chevron">' + UI.Icons.chevronRight + '</span>' +
           '</div>' +
           '<hr class="divider" />' +
-          '<div style="display:flex;justify-content:center;margin-bottom:32px;">' +
+          '<div style="display:flex;justify-content:center;margin-bottom:24px;">' +
             UI.button({ label: '로그아웃', action: 'logout', variant: 'outline' }) +
+          '</div>' +
+          '<div class="card" id="store-info-card" style="margin-bottom:16px;">' +
+            '<div style="font-size:13px;color:var(--color-text-secondary);margin-bottom:8px;">매장 정보</div>' +
+            '<div id="store-info-body" style="font-size:15px;line-height:1.7;">불러오는 중...</div>' +
           '</div>' +
           '<div class="debug-section">' +
             '<div class="debug-section-title">개발자 옵션</div>' +
@@ -179,6 +201,16 @@
           UI.showToast(r.store.autoSoldoutOnZeroStock ? '재고 소진 시 자동 품절을 켰어요' : '재고 소진 시 자동 품절을 껐어요');
         });
       });
+
+      var autoAcceptToggle = root.querySelector('[data-action="toggle-auto-accept"]');
+      autoAcceptToggle.classList.toggle('on', !!s.autoAcceptOrders);
+      autoAcceptToggle.addEventListener('click', function () {
+        var next = !this.classList.contains('on');
+        MockApi.setAutoAcceptOrders(state.currentStoreId, next).then(function (r) {
+          autoAcceptToggle.classList.toggle('on', r.store.autoAcceptOrders);
+          UI.showToast(r.store.autoAcceptOrders ? '자동 수락을 켰어요' : '자동 수락을 껐어요 · 수동 수락으로 바뀌었어요');
+        });
+      });
     });
 
     var offlineToggle = root.querySelector('[data-action="toggle-offline-sim"]');
@@ -225,6 +257,18 @@
 
     root.querySelector('[data-action="go-sales"]').addEventListener('click', function () {
       Router.showScreen('sales', { reset: true });
+    });
+
+    root.querySelector('[data-action="go-wait-time"]').addEventListener('click', function () {
+      Router.showScreen('waitTimeSettings');
+    });
+
+    root.querySelector('[data-action="go-staff"]').addEventListener('click', function () {
+      Router.showScreen('staffAccounts');
+    });
+
+    root.querySelector('[data-action="go-qr-menu"]').addEventListener('click', function () {
+      Router.showScreen('qrMenu');
     });
 
     root.querySelector('[data-action="logout"]').addEventListener('click', function () {

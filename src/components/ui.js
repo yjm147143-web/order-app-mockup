@@ -19,6 +19,7 @@
     chevronRight: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18l6-6-6-6"/></svg>',
     store: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 9l1-5h14l1 5"/><path d="M4 9a2 2 0 0 0 4 0 2 2 0 0 0 4 0 2 2 0 0 0 4 0 2 2 0 0 0 4 0"/><path d="M5 9v10h14V9"/></svg>',
     search: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/></svg>',
+    clock: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 3"/></svg>',
   };
 
   function escapeHtml(str) {
@@ -283,6 +284,36 @@
   }
 
   /*
+   * 랭킹형 매출 목록(순위/라벨(+보조문구)/금액(+비중%)) — 사장님 앱 매출 조회의 기준별 상세
+   * 화면(sales.js)에서 쓰던 것을 행사 담당자 매출현황(메뉴별/매장별 랭킹)에서도 그대로 쓰기
+   * 위해 이쪽으로 옮겼다.
+   */
+  function breakdownListHtml(data, emptyMessage) {
+    if (!data.rows || data.rows.length === 0) {
+      return (
+        '<div class="center-empty" style="padding-top:40px;"><div class="emoji">🗂️</div><div class="title">' +
+        escapeHtml(emptyMessage || '해당 기간의 매출이 없어요') + '</div></div>'
+      );
+    }
+    return (
+      '<div class="card">' +
+      data.rows
+        .map(function (row, idx) {
+          var pct = data.totalAmount > 0 ? Math.round((row.amount / data.totalAmount) * 100) : 0;
+          return (
+            '<div class="sales-breakdown-row">' +
+              '<span class="sales-breakdown-rank">' + (idx + 1) + '</span>' +
+              '<span class="sales-breakdown-label">' + escapeHtml(row.label) + (row.sub ? '<div class="sales-breakdown-sub">' + escapeHtml(row.sub) + '</div>' : '') + '</span>' +
+              '<span class="sales-breakdown-amount">' + formatWon(row.amount) + ' <span class="sales-breakdown-sub">(' + pct + '%)</span></span>' +
+            '</div>'
+          );
+        })
+        .join('') +
+      '</div>'
+    );
+  }
+
+  /*
    * 주문 카드 공용 조각들 — 원래 customers.js(사장님 주문 화면)에만 있었는데, 행사 담당자의
    * '매장별 주문조회'(읽기 전용)가 똑같은 채널 배지/픽업번호/전화번호 표시·5분 단위 시간대
    * 묶음을 그대로 써야 해서 이쪽으로 옮겼다 — 두 화면이 완전히 같은 코드를 호출한다(복붙 아님).
@@ -291,6 +322,21 @@
 
   function clockLabel(iso) {
     return new Date(iso).toLocaleTimeString('ko-KR', { hour: 'numeric', minute: '2-digit' });
+  }
+
+  /* 24시간제 시각(오전/오후 없이) — 주문 카드 상단의 강조 시각 표시 전용. clockLabel은 다른
+     곳(시간대 묶음 헤더, 상세 모달 등)에서 이미 쓰이고 있어 그대로 두고 별도로 추가했다. */
+  function clockLabel24(iso) {
+    var d = new Date(iso);
+    return String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0');
+  }
+
+  function elapsedLabel(iso) {
+    var diffMin = Math.floor((Date.now() - new Date(iso).getTime()) / 60000);
+    if (diffMin < 1) return '방금 경과';
+    if (diffMin < 60) return diffMin + '분 경과';
+    var diffHour = Math.floor(diffMin / 60);
+    return diffHour + '시간 경과';
   }
 
   function formatFullPhone(phone) {
@@ -314,6 +360,18 @@
     );
   }
 
+  var ORDER_TYPE_META = {
+    PACKAGING: { cls: 'order-type-packaging', label: '포장' },
+    REUSABLE: { cls: 'order-type-reusable', label: '다회용기' },
+    EXPERIENCE: { cls: 'order-type-experience', label: '체험' },
+  };
+
+  function orderTypeBadgeHtml(order) {
+    var meta = ORDER_TYPE_META[order.orderType];
+    if (!meta) return '';
+    return '<span class="order-type-pill ' + meta.cls + '">' + meta.label + '</span>';
+  }
+
   function pickupBlockHtml(order) {
     var isTable = order.receiveType === 'TABLE_SERVICE';
     var label = isTable ? '테이블' : '픽업번호';
@@ -327,8 +385,8 @@
   function phoneRowHtml(order) {
     if (isPhoneSuspicious(order.customerPhone)) {
       return (
-        '<div class="order-card-phone suspicious">⚠️ ' + escapeHtml(formatFullPhone(order.customerPhone)) + '</div>' +
-        '<div class="phone-warning-sub">오입력 가능성 있음</div>'
+        '<div class="order-card-phone suspicious">⚠️ ' + escapeHtml(formatFullPhone(order.customerPhone)) +
+        ' <span class="phone-warning-inline">오입력 의심</span></div>'
       );
     }
     return '<div class="order-card-phone">' + escapeHtml(formatFullPhone(order.customerPhone)) + '</div>';
@@ -394,10 +452,14 @@
     donutChartSvg: donutChartSvg,
     donutLegendHtml: donutLegendHtml,
     salesChartHtml: salesChartHtml,
+    breakdownListHtml: breakdownListHtml,
     clockLabel: clockLabel,
+    clockLabel24: clockLabel24,
+    elapsedLabel: elapsedLabel,
     formatFullPhone: formatFullPhone,
     isPhoneSuspicious: isPhoneSuspicious,
     channelBadgeHtml: channelBadgeHtml,
+    orderTypeBadgeHtml: orderTypeBadgeHtml,
     pickupBlockHtml: pickupBlockHtml,
     phoneRowHtml: phoneRowHtml,
     bucketKeyOf: bucketKeyOf,

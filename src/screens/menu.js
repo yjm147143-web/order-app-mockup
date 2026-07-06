@@ -8,8 +8,12 @@
  * 스냅샷으로 저장되어 있으므로(STEP1~3), 이 화면에서 메뉴를 수정/삭제해도 과거 주문 표시는
  * 절대 바뀌지 않는다 — 이 화면은 MenuItem 원본만 다룬다.
  *
- * 예상 대기시간: 메뉴별 조리시간 필드는 제거하고(기존 값은 데이터 모델에서 함께 삭제),
- * 매장 전체 기준 값 하나(Store.estimatedWaitMinutes)를 화면 상단에서 5분 단위로 조정한다.
+ * 예상 대기시간 설정은 이 화면에 없다 — 설정 > '예상 대기시간 관리'(waitTimeSettings.js)로
+ * 옮겨서, 실시간 주문량 기반 자동 계산식으로 바뀌었다.
+ *
+ * 같은 카테고리 안 메뉴 순서는 카테고리 순서 변경과 동일하게 위/아래 이동 버튼으로 sortOrder를
+ * 맞바꾼다(MockApi.moveMenuItem) — '전체' 탭에서는 순서를 바꿀 수 없고, 특정 카테고리 탭에서만
+ * 가능하다(무엇을 기준으로 순서를 매길지 애매해지는 것을 피하기 위함).
  */
 (function () {
   var categories = [];
@@ -20,7 +24,6 @@
   var currentUnmount = null;
   var rootEl = null;
   var storeCache = null;
-  var WAIT_STEP = 5;
 
   function visibleCategories() {
     return categories.filter(function (c) { return !c.isHidden; }).sort(function (a, b) { return a.sortOrder - b.sortOrder; });
@@ -51,7 +54,6 @@
           rightIcon: UI.Icons.menu,
           rightAction: 'manage-categories',
         }) +
-        '<div id="wait-time-card-host"></div>' +
         '<div id="category-tabs-host"></div>' +
         '<div class="screen-scroll"><div class="menu-list" id="menu-list"></div></div>' +
         '<div class="cta-fixed">' + UI.button({ label: '메뉴 추가', action: 'add-menu', variant: 'primary' }) + '</div>' +
@@ -60,15 +62,23 @@
     );
   }
 
-  function renderMenuCard(item) {
+  function renderMenuCard(item, idx, total) {
     var category = categories.find(function (c) { return c.id === item.categoryId; });
     var thumb = item.imageUrl
       ? '<img src="' + UI.escapeHtml(item.imageUrl) + '" class="menu-thumb" />'
       : '<div class="menu-thumb menu-thumb-empty">🍽️</div>';
     var metaBits = [];
     if (item.stockQuantity !== null && item.stockQuantity !== undefined) metaBits.push('재고 ' + item.stockQuantity + '개');
+    if (item.origin) metaBits.push('원산지 ' + item.origin);
+    var moveButtonsHtml = isAllView()
+      ? ''
+      : '<div class="menu-order-buttons">' +
+          '<button class="icon-btn-sm" data-action="move-menu-up" data-menu-id="' + item.id + '" ' + (idx === 0 ? 'disabled' : '') + '>▲</button>' +
+          '<button class="icon-btn-sm" data-action="move-menu-down" data-menu-id="' + item.id + '" ' + (idx === total - 1 ? 'disabled' : '') + '>▼</button>' +
+        '</div>';
     return (
       '<div class="menu-card ' + (item.isSoldout ? 'soldout' : '') + '" data-menu-id="' + item.id + '">' +
+        moveButtonsHtml +
         '<div class="menu-card-main" data-action="edit-menu" data-menu-id="' + item.id + '">' +
           thumb +
           '<div class="menu-card-body">' +
@@ -111,37 +121,7 @@
         storeCache = results[0].store;
         categories = results[1].menuCategories;
         menuItems = results[2].menuItems;
-        renderWaitTimeCard();
         renderCategoryTabs();
-      });
-    }
-
-    function renderWaitTimeCard() {
-      var host = root.querySelector('#wait-time-card-host');
-      var minutes = storeCache ? storeCache.estimatedWaitMinutes : 0;
-      host.innerHTML =
-        '<div class="card wait-time-card">' +
-          '<div class="wait-time-title">예상 대기시간</div>' +
-          '<div class="wait-time-stepper">' +
-            '<button class="wait-time-btn" data-action="wait-minus" ' + (minutes <= 0 ? 'disabled' : '') + '>-' + WAIT_STEP + '</button>' +
-            '<span class="wait-time-value">' + minutes + '분</span>' +
-            '<button class="wait-time-btn" data-action="wait-plus">+' + WAIT_STEP + '</button>' +
-          '</div>' +
-          '<div class="helper-text" style="text-align:left;margin-top:6px;">현재 예상 대기 시간은 약 ' + minutes + '분 이내입니다.</div>' +
-        '</div>';
-
-      function updateWait(next) {
-        var storeId = AppState.get().currentStoreId;
-        MockApi.updateEstimatedWaitMinutes(storeId, next).then(function (res) {
-          storeCache = res.store;
-          renderWaitTimeCard();
-        });
-      }
-      host.querySelector('[data-action="wait-minus"]').addEventListener('click', function () {
-        updateWait(Math.max(0, minutes - WAIT_STEP));
-      });
-      host.querySelector('[data-action="wait-plus"]').addEventListener('click', function () {
-        updateWait(minutes + WAIT_STEP);
       });
     }
 
@@ -185,7 +165,7 @@
         renderMenuListEmpty('이 카테고리에 메뉴를 추가해보세요.');
         return;
       }
-      listEl.innerHTML = items.map(renderMenuCard).join('');
+      listEl.innerHTML = items.map(function (item, idx) { return renderMenuCard(item, idx, items.length); }).join('');
       listEl.querySelectorAll('[data-action="edit-menu"]').forEach(function (el) {
         el.addEventListener('click', function () {
           var item = menuItems.find(function (m) { return m.id === el.getAttribute('data-menu-id'); });
@@ -194,6 +174,14 @@
       });
       listEl.querySelectorAll('[data-action="toggle-soldout"]').forEach(function (el) {
         el.addEventListener('click', function () { onToggleSoldout(el.getAttribute('data-menu-id')); });
+      });
+      listEl.querySelectorAll('[data-action="move-menu-up"], [data-action="move-menu-down"]').forEach(function (el) {
+        el.addEventListener('click', function () {
+          var direction = el.getAttribute('data-action') === 'move-menu-up' ? 'up' : 'down';
+          MockApi.moveMenuItem(el.getAttribute('data-menu-id'), direction).then(function () {
+            loadAndRender();
+          });
+        });
       });
     }
 
@@ -361,6 +349,7 @@
             imageUrl: existing.imageUrl || '',
             isVisible: existing.isVisible,
             stockQuantity: existing.stockQuantity === null || existing.stockQuantity === undefined ? '' : String(existing.stockQuantity),
+            origin: existing.origin || '',
             optionGroupsEnabled: (existing.optionGroups || []).length > 0,
             optionGroups: JSON.parse(JSON.stringify(existing.optionGroups || [])),
           }
@@ -372,6 +361,7 @@
             imageUrl: '',
             isVisible: true,
             stockQuantity: '',
+            origin: '',
             optionGroupsEnabled: false,
             optionGroups: [],
           };
@@ -410,6 +400,10 @@
                 '<label class="input-label">재고 수량 (선택)</label>' +
                 '<input class="input-field" id="menu-form-stock" type="number" min="0" value="' + UI.escapeHtml(draftMenu.stockQuantity) + '" placeholder="무제한" />' +
                 '<div class="char-counter" style="text-align:left;">비워두면 재고 관리를 하지 않는 메뉴(무제한)로 처리돼요.</div>' +
+              '</div>' +
+              '<div class="input-group">' +
+                '<label class="input-label">원산지 (선택)</label>' +
+                '<input class="input-field" id="menu-form-origin" maxlength="30" value="' + UI.escapeHtml(draftMenu.origin) + '" placeholder="예: 콜롬비아산 원두" />' +
               '</div>' +
               '<div class="input-group">' +
                 '<label class="input-label">설명 (선택)</label>' +
@@ -541,6 +535,7 @@
             '<div class="preview-card-name">' + UI.escapeHtml(draftMenu.name || '메뉴명 미입력') + '</div>' +
             '<div class="preview-card-price">' + priceLabel + '</div>' +
             (draftMenu.description ? '<div class="preview-card-desc">' + UI.escapeHtml(draftMenu.description) + '</div>' : '') +
+            (draftMenu.origin ? '<div class="preview-card-desc">원산지: ' + UI.escapeHtml(draftMenu.origin) + '</div>' : '') +
             groupsHtml +
           '</div>' +
         '</div>'
@@ -666,6 +661,12 @@
         updateSaveButtonState();
       });
 
+      var originInput = host.querySelector('#menu-form-origin');
+      originInput.addEventListener('input', function () {
+        draftMenu.origin = originInput.value;
+        refreshPreview();
+      });
+
       host.querySelector('[data-action="toggle-option-groups-enabled"]').addEventListener('click', function () {
         draftMenu.optionGroupsEnabled = !draftMenu.optionGroupsEnabled;
         this.classList.toggle('on', draftMenu.optionGroupsEnabled);
@@ -685,6 +686,7 @@
           imageUrl: draftMenu.imageUrl || '',
           isVisible: draftMenu.isVisible,
           stockQuantity: draftMenu.stockQuantity === '' ? null : Number(draftMenu.stockQuantity),
+          origin: draftMenu.origin.trim(),
           optionGroups: !draftMenu.optionGroupsEnabled
             ? []
             : draftMenu.optionGroups.map(function (g) {

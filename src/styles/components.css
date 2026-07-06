@@ -264,6 +264,7 @@
 
 /* ---------- Top Bar ---------- */
 .topbar {
+  position: relative;
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -271,9 +272,16 @@
   flex-shrink: 0;
 }
 
+/* 좌/우 버튼 폭이 서로 달라도(예: 주문 화면의 영업상태 pill) 타이틀은 항상 topbar 정중앙에 오도록
+   flex 흐름에서 빼서 절대 위치로 고정한다 — 좌우가 44px로 같은 화면에서도 결과는 동일하다. */
 .topbar-title {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
   font-size: var(--font-size-title);
   font-weight: 800;
+  white-space: nowrap;
 }
 
 .icon-btn {
@@ -305,8 +313,10 @@
 .segment-tab {
   display: inline-flex;
   align-items: center;
+  justify-content: center;
   gap: 6px;
-  padding: 8px 14px;
+  min-height: 44px;
+  padding: 8px 16px;
   border-radius: var(--radius-pill);
   background: var(--color-divider);
   color: var(--color-text-secondary);
@@ -477,10 +487,12 @@
   cursor: pointer;
 }
 
-.order-card-pgno {
-  margin-left: auto;
+.order-card-pgno-row {
+  text-align: right;
   font-size: 11px;
   color: var(--color-text-secondary);
+  margin-top: -4px;
+  margin-bottom: var(--space-2);
 }
 
 .channel-badge {
@@ -494,14 +506,42 @@
 }
 
 .channel-qr {
+  background: var(--color-white);
+  border: 1.5px solid var(--color-text-primary);
+  color: var(--color-text-primary);
+}
+
+.channel-tablet {
   background: var(--color-text-primary);
   color: var(--color-white);
 }
 
-.channel-tablet {
+.order-type-pill {
+  display: inline-flex;
+  align-items: center;
+  padding: 3px 9px;
+  margin-left: 6px;
+  border-radius: var(--radius-pill);
+  font-size: 12px;
+  font-weight: 800;
+  white-space: nowrap;
   background: var(--color-white);
-  border: 1.5px solid var(--color-text-primary);
-  color: var(--color-text-primary);
+  border: 1.5px solid;
+}
+
+.order-type-packaging {
+  border-color: #9c6b3e;
+  color: #9c6b3e;
+}
+
+.order-type-reusable {
+  border-color: #4c7a5c;
+  color: #4c7a5c;
+}
+
+.order-type-experience {
+  border-color: #4a6c93;
+  color: #4a6c93;
 }
 
 /* ---------- Order Card: 본문(대표메뉴 + 픽업번호) ---------- */
@@ -572,10 +612,17 @@
   font-weight: 800;
 }
 
-.phone-warning-sub {
+.phone-warning-inline {
   font-size: 11px;
+  font-weight: 600;
   color: var(--color-text-secondary);
-  margin: -2px 0 6px;
+}
+
+.order-card-time-emphasized {
+  font-size: 15px;
+  font-weight: 800;
+  color: var(--color-text-primary);
+  margin-bottom: 4px;
 }
 
 .order-card-actions {
@@ -687,6 +734,18 @@
   transform: rotate(180deg);
 }
 
+.time-bucket-toggle-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-left: auto;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
 .group-bulk-bar {
   display: flex;
   align-items: center;
@@ -701,21 +760,17 @@
 }
 
 .group-bulk-bar .btn-text-sm {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   color: var(--color-white);
-  padding: 4px 10px;
+  min-height: 44px;
+  padding: 8px 14px;
   background: rgba(255,255,255,0.15);
   border-radius: var(--radius-pill);
 }
 
 /* ---------- 주문 화면 최상단 공통 정보 바 ---------- */
-.order-info-bar {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-  padding: 2px 20px 8px;
-}
-
 .order-status-pill {
   display: inline-flex;
   align-items: center;
@@ -741,22 +796,46 @@
 .order-toolbar {
   display: flex;
   align-items: center;
-  justify-content: flex-end;
+  justify-content: space-between;
   gap: 4px;
-  padding: 0 20px 4px;
+  padding: 4px 20px;
 }
 
 .order-search-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
   padding: 0 20px 8px;
 }
 
+.order-search-row .search-icon {
+  font-size: 16px;
+  flex-shrink: 0;
+}
+
 .order-search-row input {
-  width: 100%;
+  flex: 1;
+  min-width: 0;
   padding: 10px 14px;
   border-radius: var(--radius-button);
   border: 1px solid var(--color-divider);
   background: var(--color-white);
   font-size: var(--font-size-body);
+}
+
+.order-menu-filter-row {
+  padding: 0 20px 4px;
+}
+
+.order-menu-filter-row select {
+  width: 100%;
+  padding: 9px 12px;
+  border-radius: var(--radius-button);
+  border: 1px solid var(--color-divider);
+  background: var(--color-white);
+  font-size: var(--font-size-caption);
+  font-weight: 600;
+  color: var(--color-text-primary);
 }
 
 /* ---------- Modal (확인/알림 팝업은 화면 정중앙에 뜨는 것이 기본형) ---------- */
@@ -976,45 +1055,21 @@
   font-weight: 800;
 }
 
-/* ---------- 예상 대기시간 카드 (메뉴 관리 화면 상단) ---------- */
-.wait-time-card {
-  margin: 8px 20px 12px;
-}
-
-.wait-time-title {
-  font-size: 13px;
-  color: var(--color-text-secondary);
-  margin-bottom: 8px;
-}
-
-.wait-time-stepper {
+/* ---------- 예상 대기시간 관리 화면 ---------- */
+.wait-config-row {
   display: flex;
   align-items: center;
-  justify-content: center;
-  gap: 16px;
-}
-
-.wait-time-btn {
-  width: 40px;
-  height: 40px;
-  border-radius: 50%;
-  border: 1px solid var(--color-divider);
-  background: var(--color-white);
-  font-weight: 800;
+  flex-wrap: wrap;
+  gap: 8px;
   font-size: 15px;
-  cursor: pointer;
+  font-weight: 600;
 }
 
-.wait-time-btn:disabled {
-  opacity: 0.4;
-  cursor: not-allowed;
-}
-
-.wait-time-value {
-  font-size: 20px;
-  font-weight: 800;
-  min-width: 60px;
+.wait-config-input {
+  width: 64px;
+  flex: none;
   text-align: center;
+  padding: 8px 6px;
 }
 
 /* 카테고리 관리 모달 */
@@ -1030,6 +1085,43 @@
   display: flex;
   flex-direction: column;
   gap: 2px;
+}
+
+.menu-order-buttons {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  flex-shrink: 0;
+}
+
+/* ---------- QR 메뉴판 보기 화면 ---------- */
+.qr-link-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.qr-link-row .input-field {
+  flex: 1;
+  min-width: 0;
+}
+
+.qr-link-row .btn {
+  width: auto;
+  flex-shrink: 0;
+  padding: 0 var(--space-4);
+}
+
+.qr-image-host {
+  display: flex;
+  justify-content: center;
+}
+
+.qr-image {
+  width: 220px;
+  height: 220px;
+  border: 1px solid var(--color-divider);
+  border-radius: var(--radius-card);
 }
 
 .icon-btn-sm {
@@ -1512,6 +1604,29 @@ select.input-field {
   font-weight: 700;
 }
 
+.detail-header-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 4px;
+}
+
+.detail-header-title {
+  font-size: 17px;
+  font-weight: 800;
+}
+
+.ai-insight-box {
+  margin-top: 10px;
+  padding: var(--space-4);
+  border-radius: var(--radius-card);
+  background: var(--color-divider);
+  font-size: 14px;
+  line-height: 1.6;
+  font-weight: 600;
+  text-align: left;
+}
+
 .date-range-bar {
   display: flex;
   gap: 8px;
@@ -1556,6 +1671,25 @@ select.input-field {
 
 .sales-total-card {
   margin-bottom: var(--space-4);
+}
+
+/* .summary-label/.summary-value는 원래 .summary-card 안에서만 스타일이 적용되도록 정의되어
+   있었는데, 매출 조회의 '총 매출' 카드는 .summary-card 없이 이 클래스만 갖다 썼어서 스타일이
+   전혀 먹지 않고 라벨과 금액이 줄바꿈 없이 붙어보이는 버그가 있었다(디자인 리뷰 발견 사항) —
+   여기서 명시적으로 지정해 고친다. */
+.sales-total-card .summary-label {
+  display: block;
+  font-size: var(--font-size-body);
+  color: var(--color-text-secondary);
+  font-weight: 500;
+  margin-bottom: 4px;
+}
+
+.sales-total-card .summary-value {
+  display: block;
+  font-size: var(--font-size-display);
+  font-weight: 800;
+  letter-spacing: -0.5px;
 }
 
 .sales-breakdown-row {
