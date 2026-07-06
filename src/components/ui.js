@@ -181,6 +181,183 @@
     );
   }
 
+  /*
+   * 차트: 별도 라이브러리 없이 순수 SVG 문자열로 직접 그린다(이 프로젝트에 이미 Icons도 같은
+   * 방식으로 하드코딩되어 있어 톤이 일관됨 — 브라우저 목업이라 npm 설치가 불가능했던 것과 별개로,
+   * 이 정도 단순한 차트는 의존성 없이 충분히 구현 가능하다는 판단). 색상은 그레이스케일 위주,
+   * 강조가 필요한 지점(최댓값 막대)에만 앱의 포인트 컬러인 블랙을 사용한다.
+   * 사장님 앱 '매출 조회'(sales.js)와 행사 담당자 '매출현황 및 분석'(eventManagerSales.js)이
+   * 이 헬퍼들을 공유한다 — 두 화면의 차트가 완전히 같은 코드로 그려진다는 뜻.
+   * 실제 React Native 전환 시에는 react-native-svg + victory-native(또는 react-native-chart-kit)
+   * 조합으로 옮기는 것을 권장한다 — 아래 barChartSvg/donutChartSvg의 입력 데이터 형태(rows: [{label,amount}])는
+   * 그대로 각 라이브러리의 데이터 prop으로 넘기면 된다.
+   */
+  var DONUT_COLORS = ['#111111', '#666666', '#a0a0a0', '#cfcfcf', '#e5e5e5'];
+
+  function barChartSvg(rows, shortLabelFn) {
+    var w = 320, h = 170, padBottom = 24, padTop = 8;
+    var maxAmount = rows.reduce(function (mx, r) { return Math.max(mx, r.amount); }, 0);
+    var barGap = 6;
+    var barWidth = rows.length ? (w - barGap * (rows.length + 1)) / rows.length : 0;
+    var bars = rows
+      .map(function (r, i) {
+        var barH = maxAmount > 0 ? ((r.amount / maxAmount) * (h - padBottom - padTop)) : 0;
+        var x = barGap + i * (barWidth + barGap);
+        var y = h - padBottom - barH;
+        var isMax = r.amount === maxAmount && maxAmount > 0;
+        return (
+          '<rect x="' + x.toFixed(1) + '" y="' + y.toFixed(1) + '" width="' + barWidth.toFixed(1) + '" height="' + Math.max(barH, 1).toFixed(1) + '" rx="3" fill="' + (isMax ? 'var(--color-text-primary)' : 'var(--color-disabled)') + '" />' +
+          '<text x="' + (x + barWidth / 2).toFixed(1) + '" y="' + (h - 8) + '" font-size="9" text-anchor="middle" fill="var(--color-text-secondary)">' + escapeHtml(shortLabelFn(r, i)) + '</text>'
+        );
+      })
+      .join('');
+    return '<svg viewBox="0 0 ' + w + ' ' + h + '" width="100%" height="' + h + '">' + bars + '</svg>';
+  }
+
+  function donutChartSvg(rows, totalAmount) {
+    var size = 160, radius = 54, stroke = 22, cx = size / 2, cy = size / 2;
+    var circumference = 2 * Math.PI * radius;
+    var offset = 0;
+    if (totalAmount <= 0) {
+      return (
+        '<svg viewBox="0 0 ' + size + ' ' + size + '" width="' + size + '" height="' + size + '">' +
+        '<circle cx="' + cx + '" cy="' + cy + '" r="' + radius + '" fill="none" stroke="var(--color-disabled)" stroke-width="' + stroke + '" /></svg>'
+      );
+    }
+    var segments = rows
+      .map(function (r, i) {
+        var frac = r.amount / totalAmount;
+        var dash = frac * circumference;
+        var seg =
+          '<circle cx="' + cx + '" cy="' + cy + '" r="' + radius + '" fill="none" stroke="' + DONUT_COLORS[i % DONUT_COLORS.length] + '" stroke-width="' + stroke + '" ' +
+          'stroke-dasharray="' + dash.toFixed(1) + ' ' + (circumference - dash).toFixed(1) + '" stroke-dashoffset="' + (-offset).toFixed(1) + '" transform="rotate(-90 ' + cx + ' ' + cy + ')" />';
+        offset += dash;
+        return seg;
+      })
+      .join('');
+    return '<svg viewBox="0 0 ' + size + ' ' + size + '" width="' + size + '" height="' + size + '">' + segments + '</svg>';
+  }
+
+  function donutLegendHtml(rows, totalAmount) {
+    return (
+      '<div class="donut-legend">' +
+      rows
+        .map(function (r, i) {
+          var pct = totalAmount > 0 ? Math.round((r.amount / totalAmount) * 100) : 0;
+          return (
+            '<div class="donut-legend-item">' +
+              '<span class="donut-legend-dot" style="background:' + DONUT_COLORS[i % DONUT_COLORS.length] + '"></span>' +
+              '<span class="donut-legend-label">' + escapeHtml(r.label) + '</span>' +
+              '<span class="donut-legend-pct">' + pct + '%</span>' +
+            '</div>'
+          );
+        })
+        .join('') +
+      '</div>'
+    );
+  }
+
+  function salesChartHtml(dimension, data) {
+    if (dimension === 'HOUR') {
+      if (data.rows.length === 0) return '';
+      return (
+        '<div class="card chart-card">' +
+          '<div class="chart-card-title">시간대별 매출 흐름</div>' +
+          '<div class="bar-chart-wrap">' + barChartSvg(data.rows, function (r) { return r.label.slice(0, 2) + '시'; }) + '</div>' +
+        '</div>'
+      );
+    }
+    if (dimension === 'PAYMENT' || dimension === 'CHANNEL') {
+      if (data.rows.length === 0) return '';
+      return (
+        '<div class="card chart-card">' +
+          '<div class="chart-card-title">' + (dimension === 'PAYMENT' ? '결제수단별 비중' : '주문경로별 비중') + '</div>' +
+          '<div class="donut-chart-wrap">' +
+            donutChartSvg(data.rows, data.totalAmount) +
+            donutLegendHtml(data.rows, data.totalAmount) +
+          '</div>' +
+        '</div>'
+      );
+    }
+    return '';
+  }
+
+  /*
+   * 주문 카드 공용 조각들 — 원래 customers.js(사장님 주문 화면)에만 있었는데, 행사 담당자의
+   * '매장별 주문조회'(읽기 전용)가 똑같은 채널 배지/픽업번호/전화번호 표시·5분 단위 시간대
+   * 묶음을 그대로 써야 해서 이쪽으로 옮겼다 — 두 화면이 완전히 같은 코드를 호출한다(복붙 아님).
+   */
+  var BUCKET_MS = 5 * 60 * 1000;
+
+  function clockLabel(iso) {
+    return new Date(iso).toLocaleTimeString('ko-KR', { hour: 'numeric', minute: '2-digit' });
+  }
+
+  function formatFullPhone(phone) {
+    var digits = (phone || '').replace(/\D/g, '');
+    if (!digits) return phone || '-';
+    return digits.slice(0, 3) + '-' + digits.slice(3, 7) + '-' + digits.slice(7);
+  }
+
+  function isPhoneSuspicious(phone) {
+    if (!phone) return true;
+    var digits = phone.replace(/\D/g, '');
+    return digits.length !== 11 || digits.slice(0, 3) !== '010';
+  }
+
+  function channelBadgeHtml(order) {
+    var isQr = order.channel === 'QR';
+    return (
+      '<span class="channel-badge ' + (isQr ? 'channel-qr' : 'channel-tablet') + '">' +
+      (isQr ? '🔳 QR오더' : '🖥️ 태블릿오더') +
+      '</span>'
+    );
+  }
+
+  function pickupBlockHtml(order) {
+    var isTable = order.receiveType === 'TABLE_SERVICE';
+    var label = isTable ? '테이블' : '픽업번호';
+    var value = isTable ? order.tableOrPickupNo : order.customerPhone ? order.customerPhone.replace(/\D/g, '').slice(-4) : '----';
+    return (
+      '<div class="order-card-pickup-block"><div class="pickup-label">' + label + '</div><div class="pickup-value">' +
+      escapeHtml(value) + '</div></div>'
+    );
+  }
+
+  function phoneRowHtml(order) {
+    if (isPhoneSuspicious(order.customerPhone)) {
+      return (
+        '<div class="order-card-phone suspicious">⚠️ ' + escapeHtml(formatFullPhone(order.customerPhone)) + '</div>' +
+        '<div class="phone-warning-sub">오입력 가능성 있음</div>'
+      );
+    }
+    return '<div class="order-card-phone">' + escapeHtml(formatFullPhone(order.customerPhone)) + '</div>';
+  }
+
+  function bucketKeyOf(iso) {
+    var d = new Date(iso);
+    var flooredMin = Math.floor(d.getMinutes() / 5) * 5;
+    return new Date(d.getFullYear(), d.getMonth(), d.getDate(), d.getHours(), flooredMin, 0, 0).getTime();
+  }
+
+  function bucketLabel(key) {
+    return clockLabel(new Date(key).toISOString()) + ' ~ ' + clockLabel(new Date(key + BUCKET_MS).toISOString());
+  }
+
+  function groupByBucket(sortedList) {
+    var groups = [];
+    var currentKey = null;
+    sortedList.forEach(function (o) {
+      var key = bucketKeyOf(o.orderedAt);
+      if (key !== currentKey) {
+        groups.push({ key: key, orders: [] });
+        currentKey = key;
+      }
+      groups[groups.length - 1].orders.push(o);
+    });
+    return groups;
+  }
+
   function confirmModalHtml(opts) {
     // opts: { overlayId, title, message, confirmLabel, confirmAction, confirmVariant, closeAction }
     return (
@@ -213,5 +390,18 @@
     showBanner: showBanner,
     segmentTabs: segmentTabs,
     confirmModalHtml: confirmModalHtml,
+    barChartSvg: barChartSvg,
+    donutChartSvg: donutChartSvg,
+    donutLegendHtml: donutLegendHtml,
+    salesChartHtml: salesChartHtml,
+    clockLabel: clockLabel,
+    formatFullPhone: formatFullPhone,
+    isPhoneSuspicious: isPhoneSuspicious,
+    channelBadgeHtml: channelBadgeHtml,
+    pickupBlockHtml: pickupBlockHtml,
+    phoneRowHtml: phoneRowHtml,
+    bucketKeyOf: bucketKeyOf,
+    bucketLabel: bucketLabel,
+    groupByBucket: groupByBucket,
   };
 })();

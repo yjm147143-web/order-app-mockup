@@ -33,6 +33,7 @@
   var state = {
     currentUser: session ? session.currentUser : null,
     currentStoreId: session ? session.currentStoreId : null,
+    currentEventId: session ? session.currentEventId : null, // 행사 담당자 계정이 선택한 담당 행사
     autoLogin: session ? !!session.autoLogin : false,
     isOffline: false, // 디버그용 오프라인 시뮬레이션 플래그 — 세션 간 유지하지 않고 항상 false로 시작한다.
   };
@@ -41,6 +42,7 @@
     saveSession({
       currentUser: state.currentUser,
       currentStoreId: state.currentStoreId,
+      currentEventId: state.currentEventId,
       autoLogin: state.autoLogin,
     });
   }
@@ -55,6 +57,9 @@
     hasSelectedStore: function () {
       return !!state.currentStoreId;
     },
+    hasSelectedEvent: function () {
+      return !!state.currentEventId;
+    },
     login: function (user, autoLogin) {
       state.currentUser = user;
       state.autoLogin = !!autoLogin;
@@ -64,9 +69,14 @@
       state.currentStoreId = storeId;
       persist();
     },
+    selectEvent: function (eventId) {
+      state.currentEventId = eventId;
+      persist();
+    },
     logout: function () {
       state.currentUser = null;
       state.currentStoreId = null;
+      state.currentEventId = null;
       state.autoLogin = false;
       persist();
     },

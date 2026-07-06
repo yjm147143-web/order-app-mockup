@@ -9,7 +9,11 @@
  * [예정 실제 REST 엔드포인트 매핑]
  *  login()                      -> POST   /auth/login
  *  getMyStores()                -> GET    /users/:userId/stores
+ *  getMyEvents()                -> GET    /users/:userId/events
+ *  getEvent()                   -> GET    /events/:eventId
  *  updateStoreOperatingStatus() -> PATCH  /stores/:storeId/operating-status
+ *  bulkUpdateStoreStatus()      -> POST   /events/:eventId/stores/bulk-status
+ *  getAuditLogs()               -> GET    /events/:eventId/audit-logs
  *  setAutoSoldoutOnZeroStock()  -> PATCH  /stores/:storeId/auto-soldout-on-zero-stock
  *  updateEstimatedWaitMinutes() -> PATCH  /stores/:storeId/estimated-wait-minutes
  *  getDashboardSummary()        -> GET    /stores/:storeId/dashboard-summary?date=
@@ -31,6 +35,7 @@
  *  setMenuSoldout()               -> PATCH  /menu-items/:menuItemId/soldout
  *  deleteMenuItem()               -> DELETE /menu-items/:menuItemId  (소프트 삭제)
  *  getSalesBreakdown()            -> GET   /stores/:storeId/sales?dimension=&from=&to=
+ *  getEventSalesBreakdown()       -> GET   /events/:eventId/sales?storeId=&dimension=&from=&to=
  *
  * 실제 프로젝트(Node 사용 가능 환경)에서는 json-server + 이 함수들 내부를
  * fetch('http://localhost:4000/...') 로 바꾸는 것을 권장한다. (README 참고)
@@ -39,11 +44,17 @@
  *  - 'mock:orders-changed'  detail: { reason } — 주문 관련 화면은 이 이벤트를 듣고 새로고침
  *  - 'mock:new-order'       detail: { order }  — 신규 주문 배너 알림용
  *  - 'mock:menu-changed'    detail: {}         — 메뉴/카테고리 화면은 이 이벤트를 듣고 새로고침
+ *
+ * [행사(Event)/매장(Store) 다중화 안내]
+ * 원래는 매장이 하나뿐이라 db.store(단수)로 관리했지만, 행사 담당자 기능 추가로 매장이 여러 개
+ * (db.stores, 배열)가 되었다. 매장은 정확히 1개의 행사(Event)에 속하고(Store.eventId), 행사
+ * 담당자 계정은 담당 행사 목록(User.eventIds)을 가진다 — 담당 행사에 속한 모든 매장이 그 행사
+ * 담당자의 접근 범위다. 사장님(OWNER) 계정은 기존처럼 User.storeIds로 자기 매장만 본다.
  */
 
 (function () {
-  var DB_KEY = 'sajang-app-mock-db-v7'; // v7: 주문 상태 대기/접수/완료 개편(WAITING/RECEIVED/COMPLETED), completedCount 추가,
-                                         // 메뉴별 cookTimeMinutes 제거 후 Store.estimatedWaitMinutes(매장 전체 공통값)로 대체
+  var DB_KEY = 'sajang-app-mock-db-v10'; // v10: 매장 현황 화면 — Store.ownerName/ownerPhone 추가,
+                                          // bulkUpdateStoreStatus/getAuditLogs로 AuditLog가 실제로 쌓이기 시작
   var LATENCY_MS = 300;
 
   function deepClone(obj) {
@@ -64,13 +75,15 @@
 
   function seedDB() {
     var db = {
-      store: deepClone(window.MockData.STORE),
+      events: deepClone(window.MockData.EVENTS),
+      stores: deepClone(window.MockData.STORES),
       users: deepClone(window.MockData.USERS),
       menuCategories: deepClone(window.MockData.MENU_CATEGORIES),
       menuItems: deepClone(window.MockData.MENU_ITEMS),
       orders: deepClone(window.MockData.ORDERS),
       orderItems: deepClone(window.MockData.ORDER_ITEMS),
       notificationLogs: deepClone(window.MockData.NOTIFICATION_LOGS),
+      auditLogs: deepClone(window.MockData.AUDIT_LOGS || []),
       nextOrderNo: window.MockData.NEXT_ORDER_NO,
     };
     saveDB(db);
@@ -111,13 +124,104 @@
     );
   }
 
+  function findStore(storeId) {
+    return db.stores.find(function (s) { return s.id === storeId; });
+  }
+
+  /** storeIds(배열) + range(inclusive)에 해당하는, 취소되지 않은 주문만 걸러낸다 — 매출 집계 공통 전처리 */
+  function ordersInRangeFor(storeIds, range) {
+    var storeIdSet = {};
+    storeIds.forEach(function (id) { storeIdSet[id] = true; });
+    var fromTime = new Date(range.from).getTime();
+    var toTime = new Date(range.to).getTime();
+    return db.orders.filter(function (o) {
+      if (!storeIdSet[o.storeId]) return false;
+      if (o.status === 'CANCELED') return false;
+      var t = new Date(o.orderedAt).getTime();
+      return t >= fromTime && t <= toTime;
+    });
+  }
+
+  /**
+   * ordersInRange를 dimension 기준으로 집계한다 — getSalesBreakdown(매장 하나)과
+   * getEventSalesBreakdown(행사 전체/특정 매장) 양쪽이 공유하는 핵심 로직.
+   * dimension: 'PERIOD'(기간별) | 'HOUR'(시간대별) | 'MENU'(메뉴별) | 'PAYMENT'(결제수단별) | 'CHANNEL'(주문경로별)
+   */
+  function computeBreakdown(ordersInRange, dimension) {
+    var totalAmount = ordersInRange.reduce(function (sum, o) { return sum + o.totalAmount; }, 0);
+    var rows = [];
+
+    if (dimension === 'PERIOD') {
+      var byDate = {};
+      ordersInRange.forEach(function (o) {
+        var d = new Date(o.orderedAt);
+        var key = d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+        byDate[key] = (byDate[key] || 0) + o.totalAmount;
+      });
+      rows = Object.keys(byDate)
+        .sort()
+        .map(function (key) { return { label: key, amount: byDate[key] }; });
+    } else if (dimension === 'HOUR') {
+      var byHour = {};
+      ordersInRange.forEach(function (o) {
+        var h = new Date(o.orderedAt).getHours();
+        byHour[h] = (byHour[h] || 0) + o.totalAmount;
+      });
+      rows = Object.keys(byHour)
+        .map(Number)
+        .sort(function (a, b) { return a - b; })
+        .map(function (h) {
+          return { label: String(h).padStart(2, '0') + '시 ~ ' + String(h).padStart(2, '0') + '시 59분', amount: byHour[h] };
+        });
+    } else if (dimension === 'MENU') {
+      var orderIdsInRange = {};
+      ordersInRange.forEach(function (o) { orderIdsInRange[o.id] = true; });
+      var byMenu = {};
+      db.orderItems.forEach(function (it) {
+        if (!orderIdsInRange[it.orderId]) return;
+        if (!byMenu[it.menuName]) byMenu[it.menuName] = { amount: 0, qty: 0 };
+        byMenu[it.menuName].amount += it.unitPrice * it.quantity;
+        byMenu[it.menuName].qty += it.quantity;
+      });
+      rows = Object.keys(byMenu)
+        .map(function (name) { return { label: name, amount: byMenu[name].amount, sub: byMenu[name].qty + '개 판매' }; })
+        .sort(function (a, b) { return b.amount - a.amount; });
+    } else if (dimension === 'CHANNEL') {
+      var byChannel = {};
+      ordersInRange.forEach(function (o) {
+        var label = o.channel === 'QR' ? 'QR오더' : '태블릿오더';
+        byChannel[label] = (byChannel[label] || 0) + o.totalAmount;
+      });
+      rows = Object.keys(byChannel)
+        .map(function (label) { return { label: label, amount: byChannel[label] }; })
+        .sort(function (a, b) { return b.amount - a.amount; });
+    } else if (dimension === 'PAYMENT') {
+      var byMethod = {};
+      ordersInRange.forEach(function (o) {
+        var hash = 0;
+        for (var i = 0; i < o.id.length; i++) hash = (hash * 31 + o.id.charCodeAt(i)) >>> 0;
+        var bucket = hash % 10;
+        var method = bucket < 6 ? '카드' : bucket < 9 ? '간편결제' : '현금';
+        byMethod[method] = (byMethod[method] || 0) + o.totalAmount;
+      });
+      rows = Object.keys(byMethod)
+        .map(function (label) { return { label: label, amount: byMethod[label] }; })
+        .sort(function (a, b) { return b.amount - a.amount; });
+    }
+
+    return { totalAmount: totalAmount, orderCount: ordersInRange.length, rows: rows };
+  }
+
   /**
    * 재고 수량이 0으로 설정되고 매장의 autoSoldoutOnZeroStock이 켜져 있으면 자동으로 품절 처리한다.
    * stockQuantity가 null(무제한)이거나 0보다 크면 건드리지 않는다(자동으로 품절 해제하지는 않음 —
    * 품절 해제는 사장님이 직접 토글해야 한다).
    */
   function applyAutoSoldout(menuItem) {
-    if (menuItem.stockQuantity === 0 && db.store.autoSoldoutOnZeroStock) {
+    if (menuItem.stockQuantity !== 0) return;
+    var category = db.menuCategories.find(function (c) { return c.id === menuItem.categoryId; });
+    var store = category && findStore(category.storeId);
+    if (store && store.autoSoldoutOnZeroStock) {
       menuItem.isSoldout = true;
     }
   }
@@ -142,64 +246,271 @@
       if (!user) {
         return withLatency({ message: '사용자를 찾을 수 없습니다.' }, true);
       }
-      var stores = user.storeIds
-        .map(function (storeId) {
-          return db.store.id === storeId ? db.store : null;
-        })
+      var stores = (user.storeIds || [])
+        .map(function (storeId) { return findStore(storeId); })
         .filter(Boolean);
       return withLatency({ stores: stores });
     },
 
+    /** GET /users/:userId/events — 행사 담당자가 담당하는 행사 목록 */
+    getMyEvents: function (userId) {
+      var user = db.users.find(function (u) {
+        return u.id === userId;
+      });
+      if (!user) {
+        return withLatency({ message: '사용자를 찾을 수 없습니다.' }, true);
+      }
+      var events = (user.eventIds || [])
+        .map(function (eventId) { return db.events.find(function (e) { return e.id === eventId; }); })
+        .filter(Boolean);
+      return withLatency({ events: events });
+    },
+
+    /** GET /events/:eventId */
+    getEvent: function (eventId) {
+      var event = db.events.find(function (e) { return e.id === eventId; });
+      if (!event) {
+        return withLatency({ message: '행사를 찾을 수 없습니다.' }, true);
+      }
+      return withLatency({ event: event });
+    },
+
+    /** GET /events/:eventId/stores — 그 행사에 속한 매장(부스) 전체 */
+    getStoresByEvent: function (eventId) {
+      var stores = db.stores.filter(function (s) { return s.eventId === eventId; });
+      return withLatency({ stores: stores });
+    },
+
+    /** GET /events/:eventId/dashboard-summary — 행사 담당자 홈 대시보드용 매장 상태/매출/주문건수 집계 */
+    getEventDashboardSummary: function (eventId) {
+      var stores = db.stores.filter(function (s) { return s.eventId === eventId; });
+      var storeCounts = { OPEN: 0, PAUSED: 0, CLOSED: 0 };
+      var todaySales = 0;
+      var totalSales = 0;
+      var todayOrderCount = 0;
+      stores.forEach(function (s) {
+        storeCounts[s.operatingStatus] = (storeCounts[s.operatingStatus] || 0) + 1;
+        todaySales += s.todaySalesAmount || 0;
+        totalSales += s.totalSalesAmount || 0;
+        todayOrderCount += s.todayOrderCount || 0;
+      });
+      return withLatency({
+        totalStores: stores.length,
+        storeCounts: storeCounts,
+        todaySales: todaySales,
+        totalSales: totalSales,
+        todayOrderCount: todayOrderCount,
+      });
+    },
+
+    /**
+     * GET /events/:eventId/attention-stores
+     * 홈 대시보드의 '주의가 필요한 매장' 섹션 — 아래 3가지 조건을 실시간으로 감지한다.
+     *  A. WAITING 상태 주문이 15분 이상 접수(수락)되지 않고 쌓여있는 매장
+     *  B. 영업중(OPEN)인데 최근 1시간 이상 신규 주문이 없는 매장 (Store.lastOrderAt 기준)
+     *  C. 이 행사가 '진행중'인데 마감(CLOSED) 상태를 30분 이상 유지하고 있는 매장
+     *     (Store.statusChangedAt 기준 — 행사가 '예정'이라 아직 시작 전인 매장의 마감은
+     *     정상 상태이므로 대상에서 제외한다)
+     * 한 매장이 여러 조건에 동시에 걸리면 항목이 여러 개 생길 수 있다.
+     */
+    getAttentionStores: function (eventId) {
+      var event = db.events.find(function (e) { return e.id === eventId; });
+      if (!event) {
+        return withLatency({ message: '행사를 찾을 수 없습니다.' }, true);
+      }
+      var stores = db.stores.filter(function (s) { return s.eventId === eventId; });
+      var now = Date.now();
+      var WAITING_STALE_MS = 15 * 60 * 1000;
+      var NO_ORDER_MS = 60 * 60 * 1000;
+      var CLOSED_STALE_MS = 30 * 60 * 1000;
+      var items = [];
+
+      stores.forEach(function (store) {
+        var staleWaitingOrder = db.orders.find(function (o) {
+          return o.storeId === store.id && o.status === 'WAITING' && now - new Date(o.orderedAt).getTime() >= WAITING_STALE_MS;
+        });
+        if (staleWaitingOrder) {
+          var waitedMin = Math.floor((now - new Date(staleWaitingOrder.orderedAt).getTime()) / 60000);
+          items.push({ storeId: store.id, storeName: store.name, boothNumber: store.boothNumber, reason: '대기 주문이 ' + waitedMin + '분째 접수되지 않고 있어요' });
+        }
+
+        if (store.operatingStatus === 'OPEN') {
+          var lastOrderTime = store.lastOrderAt ? new Date(store.lastOrderAt).getTime() : null;
+          if (!lastOrderTime || now - lastOrderTime >= NO_ORDER_MS) {
+            items.push({ storeId: store.id, storeName: store.name, boothNumber: store.boothNumber, reason: '최근 1시간 이상 신규 주문이 없어요' });
+          }
+        }
+
+        if (event.status === '진행중' && store.operatingStatus === 'CLOSED') {
+          var closedTime = store.statusChangedAt ? new Date(store.statusChangedAt).getTime() : null;
+          if (closedTime && now - closedTime >= CLOSED_STALE_MS) {
+            items.push({ storeId: store.id, storeName: store.name, boothNumber: store.boothNumber, reason: '행사 진행 중인데 마감 상태를 계속 유지하고 있어요' });
+          }
+        }
+      });
+
+      return withLatency({ items: items });
+    },
+
+    /**
+     * POST /events/:eventId/stores/bulk-status
+     * 매장 현황 화면의 전체/선택 일괄 제어 + 홈 대시보드 빠른 액션 버튼이 함께 쓰는 핵심 함수.
+     * storeIds 중 이미 targetStatus와 같은 매장은 건드리지 않고 skipped로 분류한다(중복 처리 방지).
+     * 나머지는 실제로 상태를 바꾸되, 약 10% 확률로 무작위 실패를 재현한다 — 실제 서비스라면
+     * 매장 단말기가 오프라인이거나 네트워크 문제로 개별 매장 처리가 실패할 수 있는 상황을
+     * 흉내낸 것이다. 하나가 실패해도 나머지 매장 처리는 계속 진행한다(부분 실패 허용).
+     * 처리 후 AuditLog를 한 건 남긴다(요청 1번 = 로그 1건, targetStoreIds에 전체 대상이 담김).
+     * actorUser: 조작을 실행한 행사 담당자 계정(AppState.get().currentUser).
+     * scopeLabel: 화면에 보여줄 대상 설명(예: '전체 12개', '선택한 3개') — 로그 문장에 그대로 쓰인다.
+     */
+    bulkUpdateStoreStatus: function (storeIds, targetStatus, actorUser, scopeLabel) {
+      var now = new Date().toISOString();
+      var succeeded = [];
+      var skipped = [];
+      var failed = [];
+
+      storeIds.forEach(function (storeId) {
+        var store = findStore(storeId);
+        if (!store) {
+          failed.push({ storeId: storeId, storeName: '(알 수 없는 매장)' });
+          return;
+        }
+        if (store.operatingStatus === targetStatus) {
+          skipped.push({ storeId: storeId, storeName: store.name });
+          return;
+        }
+        if (Math.random() < 0.1) {
+          failed.push({ storeId: storeId, storeName: store.name });
+          return;
+        }
+        store.operatingStatus = targetStatus;
+        store.statusChangedAt = now;
+        succeeded.push({ storeId: storeId, storeName: store.name });
+      });
+
+      var STATUS_LABEL = { OPEN: '개점', CLOSED: '마감', PAUSED: '일시중지' };
+      var statusLabel = STATUS_LABEL[targetStatus] || targetStatus;
+      var resultSummary = '성공 ' + succeeded.length + '개 · 이미 같은 상태라 제외 ' + skipped.length + '개 · 실패 ' + failed.length + '개';
+      var log = {
+        id: 'audit-' + Date.now() + '-' + Math.floor(Math.random() * 1000),
+        actorUserId: actorUser.id,
+        actorRole: actorUser.role,
+        action: '행사담당자 ' + actorUser.name + '님이 ' + (scopeLabel || storeIds.length + '개') + ' 매장을 ' + statusLabel + '(으)로 변경',
+        targetStoreIds: storeIds,
+        beforeStatus: null, // 매장마다 이전 상태가 다를 수 있어 일괄 조치에서는 단일 값으로 표현하지 않는다
+        afterStatus: targetStatus,
+        resultSummary: resultSummary,
+        timestamp: now,
+      };
+      db.auditLogs.push(log);
+      saveDB(db);
+      // eslint-disable-next-line no-console
+      console.log('[AuditLog]', log.action, '·', log.resultSummary);
+      emit('mock:orders-changed', { reason: 'bulk-store-status' }); // 사장님 앱 쪽에서 해당 매장을 보고 있다면 갱신되도록
+      emit('mock:dashboard-changed', {});
+      emit('mock:audit-log-added', { log: log });
+
+      return withLatency({ succeeded: succeeded, skipped: skipped, failed: failed, log: log });
+    },
+
+    /** GET /events/:eventId/audit-logs — 이 행사에 속한 매장을 대상으로 한 조작 이력만 최신순으로 필터링 */
+    getAuditLogs: function (eventId) {
+      var storeIdSet = {};
+      db.stores.forEach(function (s) { if (s.eventId === eventId) storeIdSet[s.id] = true; });
+      var logs = db.auditLogs
+        .filter(function (log) {
+          return log.targetStoreIds.some(function (id) { return storeIdSet[id]; });
+        })
+        .sort(function (a, b) { return new Date(b.timestamp) - new Date(a.timestamp); });
+      return withLatency({ auditLogs: logs });
+    },
+
+    /**
+     * 개발용 실시간 시뮬레이터(EventDashboardSimulator)가 주기적으로 호출 — 영업중인 매장의
+     * 오늘 매출/주문건수/최근 주문시각을 조금씩 흔들어 홈 대시보드가 실시간처럼 보이게 한다.
+     * 사장님 앱의 실제 주문 생성과는 별개로, 행사 담당자 대시보드 전용의 가벼운 집계값 시뮬레이션이다.
+     */
+    simulateStoreActivity: function () {
+      var now = new Date().toISOString();
+      var changed = false;
+      db.stores.forEach(function (store) {
+        if (store.operatingStatus !== 'OPEN') return;
+        // store-4는 '주의가 필요한 매장' 조건 B(1시간 이상 신규 주문 없음)를 보여주기 위한 고정
+        // 테스트 픽스처라, 시뮬레이터가 lastOrderAt을 계속 최신으로 되돌리면 데모/확인이 불가능해진다.
+        // 실제로는 담당자가 조치해야 없어지는 항목이라는 뜻이므로 시뮬레이터 대상에서 제외한다.
+        if (store.id === 'store-4') return;
+        if (Math.random() < 0.5) return; // 매 틱마다 전부 바뀌지 않도록
+        var bump = 5000 + Math.floor(Math.random() * 20000);
+        store.todaySalesAmount = (store.todaySalesAmount || 0) + bump;
+        store.totalSalesAmount = (store.totalSalesAmount || 0) + bump;
+        store.todayOrderCount = (store.todayOrderCount || 0) + 1;
+        store.lastOrderAt = now;
+        changed = true;
+      });
+      if (changed) {
+        saveDB(db);
+        emit('mock:dashboard-changed', {});
+      }
+      return withLatency({ ok: true });
+    },
+
     /** GET /stores/:storeId */
     getStore: function (storeId) {
-      if (db.store.id !== storeId) {
+      var store = findStore(storeId);
+      if (!store) {
         return withLatency({ message: '매장을 찾을 수 없습니다.' }, true);
       }
-      return withLatency({ store: db.store });
+      return withLatency({ store: store });
     },
 
     /** PATCH /stores/:storeId/operating-status */
     updateStoreOperatingStatus: function (storeId, status) {
-      if (db.store.id !== storeId) {
+      var store = findStore(storeId);
+      if (!store) {
         return withLatency({ message: '매장을 찾을 수 없습니다.' }, true);
       }
-      db.store.operatingStatus = status;
+      store.operatingStatus = status;
+      store.statusChangedAt = new Date().toISOString();
       saveDB(db);
-      return withLatency({ store: db.store });
+      return withLatency({ store: store });
     },
 
     /** PATCH /stores/:storeId/auto-soldout-on-zero-stock */
     setAutoSoldoutOnZeroStock: function (storeId, enabled) {
-      if (db.store.id !== storeId) {
+      var store = findStore(storeId);
+      if (!store) {
         return withLatency({ message: '매장을 찾을 수 없습니다.' }, true);
       }
-      db.store.autoSoldoutOnZeroStock = enabled;
+      store.autoSoldoutOnZeroStock = enabled;
       saveDB(db);
-      return withLatency({ store: db.store });
+      return withLatency({ store: store });
     },
 
     /** PATCH /stores/:storeId/estimated-wait-minutes — 5분 단위로 사장님이 직접 조정하는 매장 전체 공통 예상 대기시간 */
     updateEstimatedWaitMinutes: function (storeId, minutes) {
-      if (db.store.id !== storeId) {
+      var store = findStore(storeId);
+      if (!store) {
         return withLatency({ message: '매장을 찾을 수 없습니다.' }, true);
       }
-      db.store.estimatedWaitMinutes = Math.max(0, minutes);
+      store.estimatedWaitMinutes = Math.max(0, minutes);
       saveDB(db);
-      return withLatency({ store: db.store });
+      return withLatency({ store: store });
     },
 
     /** GET /stores/:storeId/dashboard-summary */
     getDashboardSummary: function (storeId) {
-      if (db.store.id !== storeId) {
+      var store = findStore(storeId);
+      if (!store) {
         return withLatency({ message: '매장을 찾을 수 없습니다.' }, true);
       }
-      var todaysOrders = db.orders.filter(function (o) {
+      var storeOrders = db.orders.filter(function (o) { return o.storeId === storeId; });
+      var todaysOrders = storeOrders.filter(function (o) {
         return isToday(o.orderedAt) && o.status !== 'CANCELED';
       });
       var todaysSales = todaysOrders.reduce(function (sum, o) {
         return sum + (o.paymentStatus === 'PAID' ? o.totalAmount : 0);
       }, 0);
-      var waitingCustomers = db.orders.filter(function (o) {
+      var waitingCustomers = storeOrders.filter(function (o) {
         return ACTIVE_STATUSES.indexOf(o.status) !== -1;
       }).length;
 
@@ -399,13 +710,20 @@
     },
 
     /** GET /stores/:storeId/orders */
-    getOrders: function () {
-      return withLatency({ orders: db.orders, orderItems: db.orderItems });
+    getOrders: function (storeId) {
+      var orders = db.orders.filter(function (o) { return o.storeId === storeId; });
+      var orderIds = {};
+      orders.forEach(function (o) { orderIds[o.id] = true; });
+      var orderItems = db.orderItems.filter(function (it) { return orderIds[it.orderId]; });
+      return withLatency({ orders: orders, orderItems: orderItems });
     },
 
     /** GET /stores/:storeId/notification-logs */
-    getNotificationLogs: function () {
-      return withLatency({ notificationLogs: db.notificationLogs });
+    getNotificationLogs: function (storeId) {
+      var orderIds = {};
+      db.orders.forEach(function (o) { if (o.storeId === storeId) orderIds[o.id] = true; });
+      var notificationLogs = db.notificationLogs.filter(function (l) { return orderIds[l.orderId]; });
+      return withLatency({ notificationLogs: notificationLogs });
     },
 
     /**
@@ -498,10 +816,11 @@
         return o.id === orderId;
       });
       if (!order) return '';
+      var store = findStore(order.storeId);
       var customerLabel = order.customerName || '#' + order.orderNo;
       var location = order.receiveType === 'TABLE_SERVICE' ? '테이블 ' + order.tableOrPickupNo + '번' : '카운터';
       return (
-        '[' + db.store.name + '] ' + customerLabel + '님, 주문하신 메뉴가 준비되었습니다. ' +
+        '[' + (store ? store.name : '') + '] ' + customerLabel + '님, 주문하신 메뉴가 준비되었습니다. ' +
         location + '에서 수령해 주세요. 주문번호: ' + order.pgOrderNo
       );
     },
@@ -539,14 +858,20 @@
 
     /** 개발용 실시간 시뮬레이터가 호출 — 무작위 신규 주문 1건 생성 */
     createRandomOrder: function (storeId) {
-      if (db.store.id !== storeId || db.store.operatingStatus !== 'OPEN') {
+      var store = findStore(storeId);
+      if (!store || store.operatingStatus !== 'OPEN') {
         return withLatency({ message: '영업 중이 아닙니다.' }, true);
+      }
+      var storeCategoryIds = {};
+      db.menuCategories.forEach(function (c) { if (c.storeId === storeId) storeCategoryIds[c.id] = true; });
+      var availableItems = db.menuItems.filter(function (m) {
+        return storeCategoryIds[m.categoryId] && m.isVisible && !m.isSoldout && !m.isDeleted;
+      });
+      if (availableItems.length === 0) {
+        return withLatency({ message: '주문 가능한 메뉴가 없습니다.' }, true);
       }
       var channel = Math.random() < 0.5 ? 'QR' : 'TABLET';
       var receiveType = Math.random() < 0.5 ? 'TABLE_SERVICE' : 'COUNTER_PICKUP';
-      var availableItems = db.menuItems.filter(function (m) {
-        return m.isVisible && !m.isSoldout && !m.isDeleted;
-      });
       var itemCount = 1 + Math.floor(Math.random() * 3);
       var chosenItems = [];
       for (var i = 0; i < itemCount; i++) {
@@ -568,6 +893,7 @@
       var ymd = now.getFullYear() + String(now.getMonth() + 1).padStart(2, '0') + String(now.getDate()).padStart(2, '0');
       var order = {
         id: orderId,
+        storeId: storeId,
         orderNo: orderNo,
         pgOrderNo: 'PG-' + ymd + '-' + String(orderNo).padStart(6, '0'),
         channel: channel,
@@ -613,98 +939,27 @@
      * 안정적으로 나눈 목업 값이다 — 실제 연동 시 Order에 paymentMethod 필드가 추가되면 그대로 교체하면 된다.
      */
     getSalesBreakdown: function (storeId, dimension, range) {
-      if (db.store.id !== storeId) {
+      if (!findStore(storeId)) {
         return withLatency({ message: '매장을 찾을 수 없습니다.' }, true);
       }
-      var fromTime = new Date(range.from).getTime();
-      var toTime = new Date(range.to).getTime();
-      var ordersInRange = db.orders.filter(function (o) {
-        if (o.status === 'CANCELED') return false;
-        var t = new Date(o.orderedAt).getTime();
-        return t >= fromTime && t <= toTime;
-      });
-      var totalAmount = ordersInRange.reduce(function (sum, o) {
-        return sum + o.totalAmount;
-      }, 0);
-      var rows = [];
+      var ordersInRange = ordersInRangeFor([storeId], range);
+      return withLatency(computeBreakdown(ordersInRange, dimension));
+    },
 
-      if (dimension === 'PERIOD') {
-        var byDate = {};
-        ordersInRange.forEach(function (o) {
-          var d = new Date(o.orderedAt);
-          var key = d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
-          byDate[key] = (byDate[key] || 0) + o.totalAmount;
-        });
-        rows = Object.keys(byDate)
-          .sort()
-          .map(function (key) {
-            return { label: key, amount: byDate[key] };
-          });
-      } else if (dimension === 'HOUR') {
-        var byHour = {};
-        ordersInRange.forEach(function (o) {
-          var h = new Date(o.orderedAt).getHours();
-          byHour[h] = (byHour[h] || 0) + o.totalAmount;
-        });
-        rows = Object.keys(byHour)
-          .map(Number)
-          .sort(function (a, b) {
-            return a - b;
-          })
-          .map(function (h) {
-            return { label: String(h).padStart(2, '0') + '시 ~ ' + String(h).padStart(2, '0') + '시 59분', amount: byHour[h] };
-          });
-      } else if (dimension === 'MENU') {
-        var orderIdsInRange = {};
-        ordersInRange.forEach(function (o) {
-          orderIdsInRange[o.id] = true;
-        });
-        var byMenu = {};
-        db.orderItems.forEach(function (it) {
-          if (!orderIdsInRange[it.orderId]) return;
-          if (!byMenu[it.menuName]) byMenu[it.menuName] = { amount: 0, qty: 0 };
-          byMenu[it.menuName].amount += it.unitPrice * it.quantity;
-          byMenu[it.menuName].qty += it.quantity;
-        });
-        rows = Object.keys(byMenu)
-          .map(function (name) {
-            return { label: name, amount: byMenu[name].amount, sub: byMenu[name].qty + '개 판매' };
-          })
-          .sort(function (a, b) {
-            return b.amount - a.amount;
-          });
-      } else if (dimension === 'CHANNEL') {
-        var byChannel = {};
-        ordersInRange.forEach(function (o) {
-          var label = o.channel === 'QR' ? 'QR오더' : '태블릿오더';
-          byChannel[label] = (byChannel[label] || 0) + o.totalAmount;
-        });
-        rows = Object.keys(byChannel)
-          .map(function (label) {
-            return { label: label, amount: byChannel[label] };
-          })
-          .sort(function (a, b) {
-            return b.amount - a.amount;
-          });
-      } else if (dimension === 'PAYMENT') {
-        var byMethod = {};
-        ordersInRange.forEach(function (o) {
-          var hash = 0;
-          for (var i = 0; i < o.id.length; i++) hash = (hash * 31 + o.id.charCodeAt(i)) >>> 0;
-          var bucket = hash % 10;
-          var method = bucket < 6 ? '카드' : bucket < 9 ? '간편결제' : '현금';
-          byMethod[method] = (byMethod[method] || 0) + o.totalAmount;
-        });
-        rows = Object.keys(byMethod)
-          .map(function (label) {
-            return { label: label, amount: byMethod[label] };
-          })
-          .sort(function (a, b) {
-            return b.amount - a.amount;
-          });
-      }
-
-      return withLatency({ totalAmount: totalAmount, orderCount: ordersInRange.length, rows: rows });
+    /**
+     * GET /events/:eventId/sales
+     * 사장님 앱의 getSalesBreakdown과 완전히 같은 집계 로직(computeBreakdown)을 재사용하되,
+     * 대상을 매장 하나가 아니라 storeIdFilter로 지정한다: null/'ALL'이면 이 행사에 속한 모든
+     * 매장의 주문을 합산하고, 특정 storeId면 그 매장 하나만 본다(매출 화면의 '매장 필터' 용도).
+     * store-1(브루웍스 성수점) 외에는 실제 Order 데이터가 없으므로(행사 담당자 기반 구조 개편
+     * 단계 참고), 다른 매장을 단독으로 선택하면 해당 기간에 매출이 없는 것으로 정상적으로 표시된다
+     * — 데이터를 지어내지 않고 실제로 존재하는 주문만 집계한 정직한 결과다.
+     */
+    getEventSalesBreakdown: function (eventId, storeIdFilter, dimension, range) {
+      var eventStoreIds = db.stores.filter(function (s) { return s.eventId === eventId; }).map(function (s) { return s.id; });
+      var targetStoreIds = storeIdFilter && storeIdFilter !== 'ALL' ? [storeIdFilter] : eventStoreIds;
+      var ordersInRange = ordersInRangeFor(targetStoreIds, range);
+      return withLatency(computeBreakdown(ordersInRange, dimension));
     },
 
     /** 개발용: 시드 데이터로 초기화 */

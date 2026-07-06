@@ -1,10 +1,356 @@
-# 사장님 관리자 앱 — STEP 1~4 + 구조 개편 + 주문/메뉴/매출 화면 재개편 + 팝업/로그인 개편
+# 사장님 관리자 앱 — STEP 1~4 + 구조 개편 + 주문/메뉴/매출 화면 재개편 + 팝업/로그인 개편 + 행사 담당자 대시보드 전체
 
 매장용 "사장님 관리자 앱" PRD의 STEP 1(프로젝트 기반 구축) + STEP 2(주문 수신 POS) +
 STEP 3(고객 목록·카카오 알림톡 호출·주문완료 처리) + STEP 4(메뉴 등록·수정·품절 처리) +
 구조 개편(하단 탭 제거) + 주문 화면 전면 개편 + 메뉴 관리 화면 개편 + 오프라인 시뮬레이션 +
 팝업 위치 통일 + 로그인 화면 개편 + 주문 상태 구조 재개편(대기/접수/완료) + 메뉴·매출 화면
-추가 개선 산출물입니다.
+추가 개선 + 행사 담당자(EVENT_MANAGER) 데이터 구조·라우팅 기반 구조 + 행사 담당자 홈 대시보드 +
+행사 담당자 매장 현황(일괄 제어) + 행사 담당자 매출현황 및 분석 + 행사 담당자 매장별
+주문조회·설정 화면 + 전체 통합 QA 산출물입니다.
+
+## 행사 담당자 매장별 주문조회 · 설정 화면 (마지막 단계)
+
+행사 담당자 기능의 마지막 두 화면을 완성하고 전체 흐름을 통합 점검했다.
+
+### 매장별 주문조회 (읽기 전용)
+
+`src/screens/eventManagerStoreOrders.js` (신규, 전역 Router 화면 — `Router.showScreen('eventManagerStoreOrders', {storeId})`).
+'매장 현황' 화면의 매장 카드를 누르거나 '매출현황'의 매장별 랭킹 항목을 누르면 진입한다.
+
+- 사장님 앱 '주문' 화면(`customers.js`)과 **완전히 같은** 채널 배지(🖥️/🔳)·픽업번호 블록·전화번호
+  표시(오입력 의심 강조 포함)·5분 단위 시간대 묶음을 쓴다 — 이 조각들을 `customers.js`에서
+  `src/components/ui.js`로 옮겨서(`UI.channelBadgeHtml`, `UI.pickupBlockHtml`, `UI.phoneRowHtml`,
+  `UI.bucketKeyOf`/`bucketLabel`/`groupByBucket`, `UI.clockLabel`, `UI.formatFullPhone`,
+  `UI.isPhoneSuspicious`) 두 화면이 진짜 같은 코드를 호출하도록 리팩터링했다.
+- **읽기 전용**: 주문 수락/고객 호출/완료 처리/되돌리기/주문취소 버튼을 아예 렌더링하지 않는다
+  (비활성화가 아니라 마크업 자체에 없음 — 실제로 버튼 개수 0건을 확인함).
+- 대기/접수/완료 탭, 픽업번호 검색, 시간대 묶음은 사장님 앱과 동일하게 유지.
+- **미호출/호출 필터**를 추가했다 — ⚠️ 다만 이 필터는 현재 사장님 앱 '주문' 화면에는 없는
+  기능이다(사장님 앱은 호출 횟수만 버튼에 "(N회)"로 표시할 뿐 별도 필터가 없음). 읽기 전용
+  조회 화면에 유용하다고 판단해 새로 추가했고, 데이터(호출 이력)는 이미 있는 것을 그대로 썼다 —
+  "사장님 앱과 동일" 요구사항을 문자 그대로 만족하는 항목은 아니라서 여기에 명시한다.
+- 카드를 탭하면 상세 모달(주문 항목/옵션/금액/주문·접수·완료 시각/호출 횟수/완료 처리 횟수/
+  취소 사유)을 보여준다.
+- 상단에 매장 선택 드롭다운 + '담당 사장님 이름·연락처 · 📞 연락하기' 카드(`tel:` 링크로 실제
+  전화 연결 시도).
+
+### 설정 화면
+
+`src/screens/eventManagerSettings.js` (신규): 행사 정보(읽기 전용) + 계정 정보(이름/역할) +
+담당 행사가 2개 이상이면 '행사 전환' 메뉴(STEP 1의 `eventSelect.js`를 그대로 재사용 — 새
+화면을 만들지 않고 `MockApi.getMyEvents()` 결과만 다시 넘김) + 로그아웃.
+
+### 셸 리팩터링
+
+`src/screens/eventManagerShell.js`가 4개 탭(홈/매장 현황/매출 현황/설정)을 전부 각자의 모듈에
+위임하도록 정리되었다 — 셸 자체는 탭 전환만 담당하는 얇은 라우터가 됐다.
+
+### 발견하고 고친 버그
+
+QA 도중 발견: 매장 현황 카드에서 개별 상태 버튼(`.store-row-actions`)이 매장 상세 이동
+영역(`data-action="view-store-orders"`) **안에** 중첩되어 있어서, 상태 버튼을 누르면 클릭
+이벤트가 버블링되어 상태 변경과 동시에 '매장별 주문조회' 화면으로 튕겨 나가는 문제가 있었다.
+상태 버튼 클릭 핸들러에 `e.stopPropagation()`을 추가해서 고쳤다(`src/screens/eventManagerStores.js`).
+
+### 통합 QA 결과
+
+| # | 시나리오 | 결과 |
+|---|---|---|
+| 1 | 행사 담당자(담당 행사 2개, manager2) 로그인 → 행사 선택 → 홈 대시보드(요약/주의 매장 리스트) | ✅ 성공 |
+| 2 | 홈에서 매장 상태 카드 클릭 → 매장 현황 이동 → 매장 검색 → 개별 상태 변경 | ✅ 성공 (버그 발견·수정 후 재검증 통과 — 위 참고) |
+| 3 | 매장 여러 개 선택 → 일괄 마감 → 결과 요약 팝업 → 이미 마감이던 매장 자동 제외 | ✅ 성공 (선택 3개 중 이미 마감 1개 정확히 제외, 나머지 2개 성공 처리) |
+| 4 | 홈에서 매출 요약 카드 클릭 → 매출현황 이동 → 기간/매장 필터 변경 → 차트 값 변화 | ✅ 성공 (매장 필터 변경 시 결제수단 비중이 46%→36%로 실제 변경 확인) |
+| 5 | 매출현황 랭킹에서 매장 클릭 → 매장별 주문조회 이동 → 상태 변경 버튼 0개 확인 → 검색/필터 동작 | ✅ 성공 |
+| 6 | 설정에서 행사 정보 확인 → 행사 전환(event-1→event-2) → 로그아웃 | ✅ 성공 |
+| 7 | 사장님 계정(owner/1234) 로그인 → 행사 담당자가 바꾼 store-1 상태('일시중지')가 사장님 '주문'/'설정' 화면에 동일하게 반영되는지 교차 확인 | ✅ 성공 |
+
+실패 항목은 시나리오 2에서 발견된 버그 1건이 전부였고, 그 자리에서 원인(이벤트 버블링)을
+찾아 수정한 뒤 재검증까지 완료했다(위 "발견하고 고친 버그" 참고). 그 외 콘솔 에러·실패한
+네트워크 요청 없음.
+
+### 변경/신규 파일
+
+`src/components/ui.js`(주문 카드 공용 조각 이전), `src/screens/customers.js`(로컬 중복 함수
+제거, `UI.*` 호출로 교체 — 동작 동일, 회귀 없음 확인), `src/screens/eventManagerStoreOrders.js`
+(신규), `src/screens/eventManagerSettings.js`(신규), `src/screens/eventManagerStores.js`(매장
+클릭 시 주문조회로 이동 + 버블링 버그 수정), `src/screens/eventManagerSales.js`(랭킹 클릭 시
+플레이스홀더 대신 실제 화면으로 이동, 관련 죽은 코드 제거), `src/screens/eventManagerShell.js`
+(4개 탭 전부 모듈 위임 구조로 정리), `index.html`(스크립트 태그 추가).
+
+## 행사 담당자 대시보드 — 실제 백엔드 연동 시 교체가 필요한 목업 API 목록
+
+이 프로젝트 전체의 원칙대로, 아래 함수들은 전부 `src/api/mockApi.js` 안에 있고 **본문만**
+`fetch(real endpoint)`로 바꾸면 화면 코드는 한 줄도 손댈 필요가 없다(함수 시그니처 유지).
+행사 담당자 기능에서 새로 추가된 것만 정리하면:
+
+| 함수 | 예정 엔드포인트 | 비고 |
+|---|---|---|
+| `getMyEvents(userId)` | `GET /users/:userId/events` | 담당 행사 목록 |
+| `getEvent(eventId)` | `GET /events/:eventId` | 행사 상세 |
+| `getStoresByEvent(eventId)` | `GET /events/:eventId/stores` | 행사에 속한 매장(부스) 목록 |
+| `getEventDashboardSummary(eventId)` | `GET /events/:eventId/dashboard-summary` | 홈 대시보드 요약(매장 상태 집계/매출/주문건수) — **실서비스에서는 매장·주문 테이블에서 실시간 집계해야 함**, 지금은 `Store.todaySalesAmount` 등 미리 계산된 목업 필드를 그대로 합산 |
+| `getAttentionStores(eventId)` | `GET /events/:eventId/attention-stores` | '주의가 필요한 매장' 감지 — 조건 A(대기 주문 지연)는 실제 Order 데이터 기반이라 그대로 이관 가능, 조건 B(`Store.lastOrderAt`)는 실서비스에서 주문 테이블 조인으로 대체 필요 |
+| `bulkUpdateStoreStatus(storeIds, targetStatus, actorUser, scopeLabel)` | `POST /events/:eventId/stores/bulk-status` | 일괄 상태 변경 — **무작위 10% 실패 시뮬레이션은 목업 전용이므로 실서비스에서는 제거**하고 실제 매장 단말기/네트워크 응답에 따른 진짜 성공/실패로 교체 |
+| `getAuditLogs(eventId)` | `GET /events/:eventId/audit-logs` | 감사 로그 조회 — 실서비스에서는 별도 감사 로그 테이블/서비스(예: 변경 불가능한 append-only 로그 저장소)를 쓰는 것을 권장 |
+| `getEventSalesBreakdown(eventId, storeIdFilter, dimension, range)` | `GET /events/:eventId/sales` | 행사 전체/매장 필터 매출 집계 — `getSalesBreakdown`과 `computeBreakdown()`을 공유하므로 실서버 전환 시 두 엔드포인트를 같은 집계 쿼리(매장 범위만 다르게)로 구현하면 된다 |
+| `updateStoreOperatingStatus(storeId, status)` | `PATCH /stores/:storeId/operating-status` | 기존 사장님 앱 함수를 행사 담당자의 개별 매장 변경에도 그대로 재사용 중 |
+
+**목업이라 실제 데이터가 없는 부분(실서비스 전환 시 반드시 채워야 함)**:
+- `Store.todaySalesAmount`/`totalSalesAmount`/`lastOrderAt`/`ownerName`/`ownerPhone` — store-1
+  (브루웍스 성수점) 외 17개 부스는 실제 `Order`/`User` 데이터가 없어 표시용 목업 값을 직접
+  넣어뒀다. 실서비스에서는 이 값들이 전부 실제 주문/계정 테이블에서 계산·조인된 값이어야 한다.
+- '매장별 주문조회'의 미호출/호출 필터, '매장 사장님에게 연락하기' `tel:` 링크는 이미 있는
+  실제 데이터(`NotificationLog`, `Store.ownerPhone`)를 그대로 사용하므로 구조 변경 없이 이관 가능.
+- 감사 로그(`AuditLog`)는 지금 목업 DB의 배열 하나로 저장되지만, 실서비스에서는 위·변조 방지가
+  중요한 데이터이므로 별도 저장소/보존 정책이 필요하다.
+
+## 행사 담당자 매출현황 및 분석 화면
+
+행사 담당자 셸의 '매출 현황' 탭이 실제 내용으로 채워졌다. `src/screens/eventManagerSales.js`
+(신규 — 다른 탭 모듈들과 동일한 패턴)가 담당하며, **사장님 앱의 '매출 조회' 화면과 완전히 같은
+차트 컴포넌트·색상**을 재사용한다(새로 만들지 않음).
+
+**재사용을 위한 리팩터링**: `barChartSvg`/`donutChartSvg`/`donutLegendHtml`/`salesChartHtml`
+(막대·도넛 차트 SVG 생성 + 카드 조립 로직)을 `src/screens/sales.js`에서 `src/components/ui.js`로
+옮겼다 — 이제 `UI.salesChartHtml(dimension, data)` 하나로 사장님 앱과 행사 담당자 앱이 완전히
+같은 코드를 호출한다(복붙이 아니라 진짜 공유). 데이터 집계 쪽도 마찬가지로 `mockApi.js`에서
+`computeBreakdown(ordersInRange, dimension)`을 추출해서, 매장 하나만 보는 기존
+`getSalesBreakdown(storeId, ...)`과 행사 전체/매장 필터를 지원하는 신규
+`getEventSalesBreakdown(eventId, storeIdFilter, dimension, range)`이 같은 집계 로직을 공유한다.
+
+**화면 구성**
+1. 상단 요약: 행사 전체 누적 매출, 오늘 매출, 참여 매장 수, 매장당 평균 매출(누적 매출 ÷
+   매장 수) — `MockApi.getEventDashboardSummary(eventId)`를 그대로 재사용(홈 대시보드와 동일 API).
+2. 기간 필터: 오늘 / 행사 전체 기간(`Event.startDate`~`endDate`) / 직접 선택(커스텀 날짜) —
+   사장님 앱 `sales.js`의 `date-range-bar`/`date-range-custom` 컴포넌트 그대로 재사용.
+3. **매장별 매출 랭킹**: 매출 높은 순 정렬 + 최댓값 대비 상대 비율만큼 채워지는 막대(1등만
+   포인트 컬러인 검정, 나머지는 회색 — 막대/도넛 차트와 같은 "최댓값만 강조" 색상 규칙을 그대로
+   따름). 기간이 '오늘'이면 `Store.todaySalesAmount` 기준, 그 외(전체 기간/커스텀)에는
+   `Store.totalSalesAmount`(누적) 기준으로 정렬한다 — 대부분의 부스가 날짜별 실제 주문 데이터를
+   갖고 있지 않아(행사 담당자 데이터 구조 개편 단계 참고) 기간별로 정교하게 나눌 수 없는 대신,
+   솔직하게 "오늘 vs 누적" 두 가지 기준만 제공한 것. 항목을 누르면 '매장별 주문조회' 자리로
+   이동한다(이 모듈 내부의 플레이스홀더 뷰로 전환 — 아직 뒤로가기만 가능, STEP 5에서 실제 내용
+   구현 예정).
+4. 시간대별 매출 추이(막대), 5. 결제수단별 비중(도넛), 6. 주문경로별 비중(도넛) — 전부
+   `UI.salesChartHtml()` 재사용, 데이터는 `MockApi.getEventSalesBreakdown()`에서 가져온다.
+5. **매장 필터**(드롭다운, 기본값 '전체 합산'): 4~6번 차트에만 적용된다(매장별 랭킹은 정의상
+   교차비교라 필터 대상에서 제외). store-1(브루웍스 성수점) 외에는 실제 주문 데이터가 없으므로,
+   다른 매장을 단독으로 선택하면 정직하게 "해당 기간의 매출이 없어요"로 표시된다(데이터를
+   지어내지 않음 — 실제로 확인함).
+
+**변경/신규 파일**: `src/components/ui.js`(차트 헬퍼 이전 + `salesChartHtml` 추가),
+`src/screens/sales.js`(로컬 차트 함수 제거하고 `UI.*` 호출로 교체 — 화면 동작은 동일),
+`src/api/mockApi.js`(`computeBreakdown`/`ordersInRangeFor` 추출, `getEventSalesBreakdown` 추가),
+`src/screens/eventManagerSales.js`(신규), `src/screens/eventManagerShell.js`(SALES 탭 위임),
+`src/styles/components.css`(`.store-rank-*` 랭킹 막대 스타일 — 색상은 기존 토큰 재사용),
+`index.html`(스크립트 태그 추가).
+
+**확인된 동작**
+- 상단 요약·기간 필터·매장별 랭킹·3개 차트 모두 정상 렌더링 확인(스크린샷으로 시각 확인 포함).
+- 매장 필터를 store-1(실제 주문 있음)로 바꾸면 차트 비율이 실제로 달라지고, 주문 데이터가 없는
+  다른 매장을 선택하면 3개 차트 모두 "해당 기간의 매출이 없어요"로 정직하게 표시되는 것 확인.
+- 기간 필터를 '행사 전체 기간'으로 바꾸면 매장별 랭킹이 오늘 매출 기준에서 누적 매출 기준으로
+  정확히 전환되는 것 확인(고로케 트럭 470,000원 → 4,700,000원, 10배 스케일 일치).
+- 랭킹 항목 클릭 시 '매장별 주문조회' 플레이스홀더로 이동하고, 뒤로가기로 복귀하는 것 확인.
+- 홈/매장 현황 탭을 오갔다가 매출 현황 탭으로 돌아와도 정상 재마운트되는 것 확인.
+- 사장님 앱(owner/1234)의 기존 '매출 조회' 화면(기간별/시간대별/메뉴별/결제수단별/주문경로별)이
+  리팩터링 후에도 콘솔 에러 없이 동일하게 동작하는 것 재확인(회귀 없음).
+
+## 행사 담당자 매장 현황 화면 (일괄 제어)
+
+행사 담당자 셸의 '매장 현황' 탭이 실제 내용으로 채워졌다. `src/screens/eventManagerStores.js`
+(신규 — `eventManagerHome.js`와 동일하게 Router 화면이 아니라 셸의 'STORES' 탭이 직접
+render/mount/unmount를 호출하는 하위 모듈)가 담당한다.
+
+**리스트**: 매장명, 부스 번호, 영업상태(사장님 앱과 동일한 `.operating-status-dot` 색상 규칙 —
+영업중=초록/일시중지=주황/마감=빨강), 상태 최종 변경 시각(상대 시간), 오늘 매출/주문건수,
+담당 사장님 이름·연락처(`Store.ownerName`/`ownerPhone`, 신규 필드 — store-1 외 17개 부스는
+실제 User 계정이 없어 표시용 값만 넣음)를 보여준다. 이름순/매출 높은순/상태별 정렬, 매장명
+검색, 상태별 필터(전체/영업중/일시중지/마감, 각 탭에 개수 표시)를 모두 지원한다.
+
+**일괄 제어(전체·선택 공통 로직)**: 화면 상단 '전체 개점/일시중지/마감' 버튼과, 체크박스로
+매장을 선택하면 하단에 뜨는(`position: sticky` 고정) 액션바의 '선택 매장 개점/일시중지/마감'
+버튼이 **완전히 같은 함수**(`MockApi.bulkUpdateStoreStatus` + `eventManagerStores.js`의
+`runBulkAction`)를 탄다.
+1. 확인 팝업(화면 중앙)에서 실제 영향받는 매장 수를 미리 계산해 보여준다 — 예: "전체 12개
+   매장을 개점할까요? 이미 영업중 상태인 매장 7개는 제외됩니다."
+2. 확인을 누르면 대상 매장을 순회하며 상태를 바꾼다. 이미 같은 상태인 매장은 건드리지 않고
+   자동 제외(skipped)하며, 나머지는 실제로 바꾸되 **약 10% 확률로 무작위 실패를 재현**한다
+   (테스트를 위해 일부러 섞은 실패 케이스 — 매장 단말기 오프라인 등을 흉내). 하나가 실패해도
+   나머지 매장 처리는 계속 진행한다(부분 실패 허용).
+3. 처리 결과를 요약 팝업으로 보여준다: "성공 N개 · 이미 같은 상태라 제외 N개 · 실패 N개" +
+   실패한 매장명 목록. 실패가 있으면 **'실패 건 재시도'** 버튼이 떠서, 실패했던 매장만 다시
+   `bulkUpdateStoreStatus`를 호출한다(재시도도 같은 10% 확률 실패를 다시 탈 수 있어 여러 번
+   눌러야 전부 성공할 수도 있다 — 실제 테스트에서 확인함).
+4. 처리 1건마다 `AuditLog`에 한 건씩 기록한다: `"행사담당자 {이름}님이 {전체 N개|선택한 N개}
+   매장을 {상태}(으)로 변경"` + `resultSummary`("성공 N개 · 이미 같은 상태라 제외 N개 · 실패
+   N개") + `timestamp`. 화면 하단 **'최근 조치 이력'** 섹션에서 최신순으로 확인할 수 있고,
+   `console.log('[AuditLog]', ...)`로도 함께 출력된다.
+
+**개별 매장 상태 변경**: 리스트의 각 매장 카드에는 현재 상태에서 갈 수 있는 다음 상태 버튼이
+바로 붙어 있다(사장님 앱 설정 화면의 `actionsFor(status)`와 같은 패턴 — OPEN이면 '일시중지'/'마감',
+PAUSED면 '개점'/'마감', CLOSED면 '개점'만). 이건 일괄 제어와 의도적으로 다르게 설계했다 —
+"바로 바꿀 수 있는" 가벼운 조작이라는 요구사항에 맞춰 **확인 팝업 없이 즉시 반영**되고, 실패
+시뮬레이션도 없고, AuditLog에도 남기지 않는다(감사 로그는 일괄 조치 전용).
+
+**홈 대시보드 연결**: STEP 2에서 만든 홈 대시보드의 '전체 매장 마감/개점' 빠른 액션 버튼이
+이제 플레이스홀더 토스트 대신 `window.EventManagerStores.runBulkAction(...)`을 직접 호출한다 —
+확인 팝업의 제외 매장 수 계산, 처리, 결과 요약, 감사 로그까지 매장 현황 화면과 100% 동일한
+코드 경로를 탄다(로직 중복 없음). 홈 화면 전용 모달 호스트(`#em-home-modal-host`)를 그대로
+`hostEl`로 넘겨서 재사용했다.
+
+**데이터/API 추가** (DB_KEY `v10`으로 버전업)
+- `Store`에 `ownerName`/`ownerPhone` 필드 추가.
+- `MockApi.bulkUpdateStoreStatus(storeIds, targetStatus, actorUser, scopeLabel)`,
+  `MockApi.getAuditLogs(eventId)` 신규 추가. `AuditLog`가 이제 실제로 쌓이기 시작한다(이전
+  단계에서는 구조만 정의하고 빈 배열이었음).
+- 변경/신규 파일: `src/data/mockData.js`, `src/api/mockApi.js`, `src/screens/eventManagerStores.js`
+  (신규), `src/screens/eventManagerShell.js`(STORES 탭을 위 모듈에 위임), `src/screens/eventManagerHome.js`
+  (빠른 액션 버튼을 실제 로직에 연결), `src/styles/components.css`(`.store-row-actions .btn` 컴팩트
+  버튼 스타일 — 색상/카드/뱃지는 전부 기존 것 재사용), `index.html`(스크립트 태그 추가).
+
+**확인된 동작**
+- 검색("떡볶이" 입력 시 1건만), 상태 필터(마감 탭 선택 시 해당 매장만), 정렬(매출 높은순 상위
+  3개가 실제 금액 내림차순과 일치) 모두 정상 동작 확인.
+- 선택 매장 일괄 일시중지 → 확인 팝업 → 처리(무작위 실패 재현됨) → 결과 요약 → '실패 건
+  재시도'를 여러 번 눌러 최종 전부 성공까지 확인. 이미 같은 상태인 매장이 자동 제외되는 것도
+  확인(예: "이미 영업중 상태인 매장 7개는 제외됩니다").
+- 감사 로그가 조작할 때마다 실제로 쌓이는 것을 `MockApi.getAuditLogs()`와 화면의 '최근 조치
+  이력' 섹션 양쪽에서 확인.
+- 홈 대시보드 '전체 매장 개점' 버튼 클릭 → 매장 현황 화면과 동일한 확인 팝업(정확한 제외 개수
+  포함)이 뜨고, 처리 후 홈 대시보드의 매장 요약 카드가 즉시 갱신되는 것 확인(12/12로 반영).
+- 기존 사장님 앱(owner/1234) 화면 회귀 없음 재확인.
+
+## 행사 담당자 홈 대시보드
+
+행사 담당자 셸의 '홈' 탭이 실제 내용으로 채워졌다. "① 행사가 잘 돌아가고 있는가, ② 지금
+개입해야 할 곳이 있는가, ③ 매출은 어느 정도인가"에 즉시 답할 수 있는 정보만 담고, 개별
+매장의 메뉴/재고 같은 세부 운영 정보는 다루지 않는다(설계 원칙 그대로).
+
+**화면 구성** (`src/screens/eventManagerHome.js`, 신규 — Router 화면이 아니라 `eventManagerShell.js`의
+'홈' 탭이 직접 render/mount/unmount를 호출하는 하위 모듈)
+1. 상단: 행사명, 기간("2026.07.04 ~ 07.09" 형태), 며칠째인지("3일차"), 로그인한 담당자 이름.
+2. 매장 상태 요약 카드: 영업중/일시중지/마감 매장 수 + 총 매장 수(색상은 기존 `.operating-status-dot`
+   점 재사용 — 새 배지 색을 만들지 않았다). 누르면 '매장 현황' 탭으로 이동(`em:goto-tab` 커스텀
+   이벤트로 셸에게 탭 전환을 요청 — 홈 모듈은 셸의 탭 상태를 직접 건드리지 않는다).
+3. 매출 요약 카드: 오늘 누적 매출 + 행사 시작 이후 누적 매출(목업 집계값). 누르면 '매출 현황' 탭으로 이동.
+4. 오늘 총 주문건수 카드.
+5. **'주의가 필요한 매장'** — 아래 3가지 조건을 매번 실제 데이터로 감지한다(하드코딩된 목록이 아님):
+   - **A. 대기 지연**: WAITING 주문이 15분 이상 접수되지 않은 매장 — 실제 `Order.orderedAt` 기준으로 계산.
+   - **B. 신규 주문 없음**: 영업중인데 `Store.lastOrderAt`이 1시간 이상 전인 매장.
+   - **C. 장시간 마감**: 행사가 '진행중'인데 `Store.statusChangedAt` 기준 마감 상태를 30분 이상
+     유지 중인 매장(행사가 '예정'이라 아직 시작 전인 매장의 마감은 정상 상태라 제외했다).
+   `MockApi.getAttentionStores(eventId)`가 매번 새로 계산하며, 시드 데이터에 세 조건을 각각
+   최소 1개씩 트리거하도록 픽스처를 넣어뒀다: 조건 A는 타코야끼 부스(store-3)에 25분 전 WAITING
+   주문, 조건 B는 크래프트비어 하우스(store-4)를 영업중 + 95분 전 마지막 주문으로, 조건 C는
+   기존 시드에서 이미 CLOSED로 배정된 떡볶이 포차(store-5)/핫도그 트럭(store-9)이 자연스럽게
+   해당된다. 실제 확인해보니 store-1(브루웍스 성수점)의 실제 주문(order-5, 15분 전 WAITING)도
+   조건 A에 우연히 걸려 함께 노출됨 — 하드코딩이 아니라 진짜 계산 로직이라는 걸 보여주는 사례.
+6. 빠른 액션 버튼 '전체 매장 마감' / '전체 매장 개점' — 누르면 화면 중앙 확인 팝업만 뜨고,
+   확인을 눌러도 토스트 안내만 뜬다("다음 단계(매장 현황 및 일괄 제어)에서 실제로 처리하도록
+   연결될 예정입니다"). 실제 일괄 처리 로직은 다음 단계에서 연결한다.
+
+**실시간 시뮬레이터** (`src/services/eventDashboardSimulator.js`, 신규 — `orderSimulator.js`와
+같은 패턴): 10~20초 간격으로 `MockApi.simulateStoreActivity()`를 호출해 영업중인 매장들의
+오늘 매출/누적 매출/주문건수/최근 주문시각을 조금씩 올리고 `mock:dashboard-changed` 이벤트를
+쏜다. 홈 화면은 이 이벤트를 듣고 있다가 다시 불러온다. `eventManagerShell.js`가 마운트되어
+있는 동안(어느 탭을 보고 있든) 계속 돌아가다가, 로그아웃 등으로 셸이 언마운트되면 멈춘다.
+단, 조건 B 테스트 픽스처인 store-4는 시뮬레이터가 `lastOrderAt`을 계속 최신으로 되돌리면
+데모/확인이 불가능해지므로 의도적으로 시뮬레이터 대상에서 제외했다(주석 참고).
+
+**데이터/API 추가** (`src/data/mockData.js`, `src/api/mockApi.js` — DB_KEY `v9`로 버전업)
+- `Store`에 `totalSalesAmount`(누적 매출 목업값), `lastOrderAt`, `statusChangedAt` 필드 추가.
+  `statusChangedAt`은 `updateStoreOperatingStatus` 호출 시마다 자동 갱신된다.
+- `MockApi.getEventDashboardSummary(eventId)`, `MockApi.getAttentionStores(eventId)`,
+  `MockApi.simulateStoreActivity()` 신규 추가.
+- 변경/신규 파일: `src/data/mockData.js`, `src/api/mockApi.js`, `src/screens/eventManagerHome.js`
+  (신규), `src/screens/eventManagerShell.js`(홈 탭을 위 모듈에 위임 + `em:goto-tab` 리스너 +
+  시뮬레이터 생명주기 연결), `src/services/eventDashboardSimulator.js`(신규), `index.html`
+  (스크립트 태그 추가).
+
+**다음 단계에서 이어서 쓸 진입점**
+- '매장 현황' 화면: `eventManagerShell.js`의 `STORES` 탭(`TAB_TITLES.STORES`) 자리에 만들면 되고,
+  홈 대시보드의 매장 요약 카드가 이미 `em:goto-tab`으로 이 탭을 가리키고 있다. 매장 목록은
+  `MockApi.getStoresByEvent(AppState.get().currentEventId)`로 시작.
+- '매출현황 및 분석' 화면: 같은 방식으로 `SALES` 탭 자리에 만들면 되고, 매출 요약 카드가 이미
+  이 탭을 가리키고 있다.
+- '전체 매장 마감/개점' 실제 일괄 처리: `eventManagerHome.js`의 `openQuickActionModal` 내부
+  `confirm-em-quick-action` 클릭 핸들러(현재는 토스트만 띄움)에 `MockApi.getStoresByEvent` +
+  `updateStoreOperatingStatus`를 매장별로 순회 호출하는 로직을 연결하면 되고, 이때 `AuditLog`
+  (`db.auditLogs`, 구조는 이미 정의되어 있음)에 실제로 기록을 쌓기 시작하면 된다.
+
+**확인된 동작**
+- 홈 화면에 매장 상태 요약/매출 요약/오늘 주문건수/주의 필요 매장 리스트/빠른 액션 버튼 모두 노출 확인.
+- 조건 A/B/C 각각 최소 1개 매장씩 정확히 감지되는 것 확인(위 목록 참고).
+- 매장 요약/매출 요약 카드 클릭 시 해당 탭으로 정상 전환 확인.
+- 빠른 액션 버튼 클릭 시 화면 중앙 확인 팝업이 뜨고, 확인 시 안내 토스트만 뜨는 것(실제 처리는
+  아직 안 함) 확인.
+- 시뮬레이터가 10~20초 간격으로 매출/주문건수를 실제로 변경하고 화면이 자동 갱신되는 것 확인
+  (수동으로 여러 번 틱을 발생시켜 오늘 주문건수가 실시간으로 올라가는 것을 검증함).
+- manager2 계정으로 event-2(예정 상태) 대시보드 진입 시 "주의가 필요한 매장 없음"으로 깨끗하게
+  나오는 것 확인(예정 상태 행사에서는 마감 상태가 정상이므로 조건 C가 제외되도록 설계함).
+- 기존 사장님 앱(owner/1234) 화면 회귀 없음 재확인.
+
+## 행사 담당자(EVENT_MANAGER) 기반 구조
+
+로그인 화면의 '행사 담당자' 탭이 더 이상 빈 placeholder로 연결되지 않고, 실제 데이터 구조와
+전용 네비게이션 뼈대로 연결된다. 화면 내용(홈 대시보드/매장 현황/매출 현황) 자체는 아직 비어
+있고, 다음 단계들에서 채울 예정이다.
+
+**데이터 모델** (`src/data/mockData.js`)
+- **Event**: `id, name, location, startDate, endDate, status(예정|진행중|종료)`. 시드 데이터로
+  2개 — `event-1`(성수 푸드마켓 2026, 진행중), `event-2`(강남 브루어리 페스티벌 2026, 예정).
+- **Store**에 `eventId`(소속 행사), `boothNumber`(부스 번호) 필드를 추가하고, 매장을 기존 1개
+  (`store-1`, 브루웍스 성수점 — 기존 사장님 데모 계정이 그대로 씀)에서 **18개**로 늘렸다
+  (event-1에 12개 `store-1~store-12`, event-2에 6개 `store-13~store-18`). 영업상태(OPEN/PAUSED/CLOSED)와
+  매출값(`todaySalesAmount`/`todayOrderCount`, 목업 집계값)이 매장마다 다르게 시드되어 있다.
+  store-1 외 나머지 17개는 실제 메뉴/주문 데이터는 없다(이번 단계 범위 밖 — 다음 단계에서 매장
+  현황/매출 현황 화면을 만들 때 이 집계값을 그대로 쓰거나 필요하면 실제 Order 데이터로 교체하면 된다).
+- **User**에 `role: 'EVENT_MANAGER'` + `eventIds[]`(담당 행사 목록) 추가. 테스트 계정 2개:
+  `manager1`(비번 1234, 담당 행사 1개 — event-1) / `manager2`(비번 1234, 담당 행사 2개 — event-1, event-2).
+- **AuditLog** 데이터 구조만 정의(빈 배열 `db.auditLogs`로 시작) — `id, actorUserId, actorRole,
+  action, targetStoreIds, beforeStatus, afterStatus, resultSummary, timestamp`. 행사 담당자가
+  매장에 일괄 조치를 하는 다음 단계에서 실제로 쌓일 예정.
+- **매장이 여러 개가 되면서 생긴 연쇄 변경**: `Order`에 `storeId` 필드를 추가했고, `mockApi.js`의
+  `db.store`(단수)를 `db.stores`(배열)로 바꾸면서 `getStore/updateStoreOperatingStatus/
+  setAutoSoldoutOnZeroStock/updateEstimatedWaitMinutes/getDashboardSummary/createRandomOrder/
+  getSalesBreakdown/getOrders/getNotificationLogs`가 전부 매장 단위로 올바르게 필터링되도록
+  고쳤다(기존엔 매장이 하나뿐이라 필터링 없이도 우연히 맞았던 부분들). 사장님 앱 화면들은 원래부터
+  storeId를 인자로 넘기는 구조였어서 화면 코드는 전혀 손대지 않았다 — 검증 결과 기존 사장님
+  데모 계정(owner/1234) 흐름은 그대로 동작한다.
+
+**라우팅 / 신규 화면**
+- `src/screens/login.js`: '행사 담당자' 탭 선택 후 로그인하면 이제 실제로 `MockApi.login()`으로
+  인증하고, 계정의 `role`이 선택한 탭과 다르면 에러를 보여준다("행사 담당자 계정이 아닙니다" 등).
+  탭을 바꾸면 데모 계정 힌트 문구와 아이디 자동입력값도 함께 바뀐다.
+- `src/screens/eventSelect.js` (신규): 담당 행사가 2개 이상일 때만 보이는 행사 선택 화면
+  (`storeSelect.js`와 동일한 패턴). 하나를 고르면 `AppState.selectEvent(eventId)` 후 셸로 이동.
+- `src/screens/eventManagerShell.js` (신규, 기존 `eventManagerDashboard.js` placeholder를 대체 —
+  그 파일은 삭제함): 행사 담당자 전용 네비게이션 뼈대. **사장님 앱과 완전히 분리된** 하단 탭 4개
+  (홈 / 매장 현황 / 매출 현황 / 설정)를 가지며, 탭 전환은 `sales.js`의 허브/상세 패턴처럼 전역
+  Router를 거치지 않고 화면 내부에서 처리한다. 홈/매장 현황/매출 현황은 아직 빈 화면("다음 단계에서
+  채워질 예정")이고, 설정 탭에는 현재 담당 행사 정보 표시 + 로그아웃 버튼만 있다. 다음 단계에서
+  매장 목록이 필요하면 `MockApi.getStoresByEvent(AppState.get().currentEventId)`로 시작하면 된다.
+- `src/state/store.js`: `currentEventId` 필드 + `selectEvent()`/`hasSelectedEvent()` 추가(세션에
+  함께 저장되어 자동 로그인 시 행사 선택도 함께 스킵됨).
+- `src/main.js`: 부트스트랩 로직이 `user.role`로 분기 — `EVENT_MANAGER`면 담당 행사 개수에 따라
+  `eventManagerShell` 또는 `eventSelect`로, 그 외(`OWNER`)는 기존과 동일하게 `customers`로 이동.
+- `src/api/mockApi.js`: `getMyEvents(userId)`, `getEvent(eventId)`, `getStoresByEvent(eventId)`
+  신규 추가.
+- 변경/신규 파일: `src/data/mockData.js`, `src/api/mockApi.js`(DB_KEY `v8`로 버전업), `src/state/store.js`,
+  `src/main.js`, `src/screens/login.js`, `src/screens/eventSelect.js`(신규), `src/screens/eventManagerShell.js`
+  (신규, `eventManagerDashboard.js` 대체), `src/styles/components.css`(`.em-tabbar` 등 행사 담당자
+  전용 탭바 스타일 — 사장님 앱 톤 그대로, 새 스타일 새로 만들지 않음), `index.html`(스크립트 태그 교체).
+
+**확인된 동작**
+- `manager1`(담당 행사 1개) 로그인 → 행사 선택 화면 없이 바로 `eventManagerShell`(홈 탭) 진입 확인.
+- `manager2`(담당 행사 2개) 로그인 → 행사 선택 화면에 2개 행사 카드 노출 → 하나 선택 시 해당
+  행사 컨텍스트(`currentEventId`)로 셸 진입 확인.
+- `event-1`에 매장 12개, `event-2`에 매장 6개(총 18개) 연결 확인.
+- 자동 로그인 체크 시 새로고침해도 행사 담당자 세션이 유지되어 로그인/행사선택 없이 바로 셸로
+  진입하는 것 확인.
+- 기존 사장님 데모 계정(owner/1234)으로 주문/메뉴/설정/매출 화면을 모두 돌아봐도 콘솔 에러나
+  실패한 요청 없이 기존과 동일하게 동작하는 것 확인(매장 다중화 리팩토링 회귀 없음).
 
 ## 주문 화면 — 상태 구조 재개편(대기 → 접수 → 완료)
 

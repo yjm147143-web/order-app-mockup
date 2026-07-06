@@ -1701,3 +1701,89 @@ select.input-field {
   text-decoration: underline;
   cursor: pointer;
 }
+
+/* ---------- 행사 담당자 전용 하단 탭바 (사장님 앱과 완전히 분리된 네비게이션) ---------- */
+.em-tabbar {
+  display: flex;
+  flex-shrink: 0;
+  border-top: 1px solid var(--color-divider);
+  background: var(--color-white);
+}
+
+.em-tab-item {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 3px;
+  padding: 10px 0 8px;
+  background: transparent;
+  border: none;
+  color: var(--color-text-secondary);
+  cursor: pointer;
+}
+
+.em-tab-item.active {
+  color: var(--color-text-primary);
+}
+
+.em-tab-icon svg {
+  width: 22px;
+  height: 22px;
+}
+
+.em-tab-label {
+  font-size: 11px;
+  font-weight: 700;
+}
+
+/* ---------- 매장 현황 리스트 — 카드 안의 개별 상태 버튼은 본문 버튼보다 작게 ---------- */
+.store-row-actions .btn {
+  height: auto;
+  min-height: 0;
+  padding: 6px 12px;
+  font-size: 12px;
+}
+
+/* ---------- 행사 담당자 매출현황 — 매장별 매출 랭킹(막대 상대 비교) ---------- */
+.store-rank-row {
+  margin-bottom: 12px;
+  cursor: pointer;
+}
+
+.store-rank-row:last-child {
+  margin-bottom: 0;
+}
+
+.store-rank-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  font-size: 13px;
+  margin-bottom: 4px;
+  gap: 8px;
+}
+
+.store-rank-name {
+  font-weight: 700;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.store-rank-amount {
+  font-weight: 800;
+  flex-shrink: 0;
+}
+
+.store-rank-bar-track {
+  height: 8px;
+  background: var(--color-divider);
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+.store-rank-bar-fill {
+  height: 100%;
+  border-radius: 4px;
+}

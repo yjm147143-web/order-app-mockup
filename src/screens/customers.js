@@ -29,7 +29,6 @@
   ];
   var CANCEL_REASONS = ['품절', '고객요청', '오류'];
   var CUSTOM_REASON_KEY = 'CUSTOM';
-  var BUCKET_MS = 5 * 60 * 1000;
   var REFRESH_INTERVAL_MS = 20000;
 
   var activeSegment = 'WAITING';
@@ -45,22 +44,6 @@
   var searchOpen = false;
   var searchQuery = '';
   var currentUnmount = null;
-
-  function formatFullPhone(phone) {
-    var digits = (phone || '').replace(/\D/g, '');
-    if (!digits) return phone || '-';
-    return digits.slice(0, 3) + '-' + digits.slice(3, 7) + '-' + digits.slice(7);
-  }
-
-  function isPhoneSuspicious(phone) {
-    if (!phone) return true;
-    var digits = phone.replace(/\D/g, '');
-    return digits.length !== 11 || digits.slice(0, 3) !== '010';
-  }
-
-  function clockLabel(iso) {
-    return new Date(iso).toLocaleTimeString('ko-KR', { hour: 'numeric', minute: '2-digit' });
-  }
 
   function itemsOf(orderId) {
     return itemsCache.filter(function (it) {
@@ -89,59 +72,6 @@
     if (order.status === 'WAITING') return 'WAITING';
     if (order.status === 'RECEIVED') return 'RECEIVED';
     return 'DONE'; // COMPLETED | CANCELED
-  }
-
-  function bucketKeyOf(iso) {
-    var d = new Date(iso);
-    var flooredMin = Math.floor(d.getMinutes() / 5) * 5;
-    return new Date(d.getFullYear(), d.getMonth(), d.getDate(), d.getHours(), flooredMin, 0, 0).getTime();
-  }
-
-  function bucketLabel(key) {
-    return clockLabel(new Date(key).toISOString()) + ' ~ ' + clockLabel(new Date(key + BUCKET_MS).toISOString());
-  }
-
-  function groupByBucket(sortedList) {
-    var groups = [];
-    var currentKey = null;
-    sortedList.forEach(function (o) {
-      var key = bucketKeyOf(o.orderedAt);
-      if (key !== currentKey) {
-        groups.push({ key: key, orders: [] });
-        currentKey = key;
-      }
-      groups[groups.length - 1].orders.push(o);
-    });
-    return groups;
-  }
-
-  function channelBadgeHtml(order) {
-    var isQr = order.channel === 'QR';
-    return (
-      '<span class="channel-badge ' + (isQr ? 'channel-qr' : 'channel-tablet') + '">' +
-      (isQr ? '🔳 QR오더' : '🖥️ 태블릿오더') +
-      '</span>'
-    );
-  }
-
-  function pickupBlockHtml(order) {
-    var isTable = order.receiveType === 'TABLE_SERVICE';
-    var label = isTable ? '테이블' : '픽업번호';
-    var value = isTable ? order.tableOrPickupNo : order.customerPhone ? order.customerPhone.replace(/\D/g, '').slice(-4) : '----';
-    return (
-      '<div class="order-card-pickup-block"><div class="pickup-label">' + label + '</div><div class="pickup-value">' +
-      UI.escapeHtml(value) + '</div></div>'
-    );
-  }
-
-  function phoneRowHtml(order) {
-    if (isPhoneSuspicious(order.customerPhone)) {
-      return (
-        '<div class="order-card-phone suspicious">⚠️ ' + UI.escapeHtml(formatFullPhone(order.customerPhone)) + '</div>' +
-        '<div class="phone-warning-sub">오입력 가능성 있음</div>'
-      );
-    }
-    return '<div class="order-card-phone">' + UI.escapeHtml(formatFullPhone(order.customerPhone)) + '</div>';
   }
 
   function actionButtonsFor(order, segment) {
@@ -201,7 +131,7 @@
           .map(function (h) {
             return (
               '<div class="call-history-item"><span>' + UI.badge('발송 실패', 'danger-soft') +
-              '</span><span>' + clockLabel(h.sentAt) + ' · 재발송이 필요해요</span></div>'
+              '</span><span>' + UI.clockLabel(h.sentAt) + ' · 재발송이 필요해요</span></div>'
             );
           })
           .join('');
@@ -230,16 +160,16 @@
         '<div class="order-card-header-row">' +
           '<label class="order-checkbox-label"><input type="checkbox" class="order-select-checkbox" data-order-id="' + order.id + '" ' +
             (selectedIds[order.id] ? 'checked' : '') + ' /></label>' +
-          channelBadgeHtml(order) +
+          UI.channelBadgeHtml(order) +
           '<span class="order-card-pgno">' + UI.escapeHtml(order.pgOrderNo) + '</span>' +
         '</div>' +
         '<div class="order-card-main" data-action="toggle-expand" data-order-id="' + order.id + '">' +
           '<div class="order-card-content-row">' +
             '<div class="order-card-menu-main">' + UI.escapeHtml(menuSummary(order.id)) + '</div>' +
-            pickupBlockHtml(order) +
+            UI.pickupBlockHtml(order) +
           '</div>' +
-          phoneRowHtml(order) +
-          '<div class="order-card-time">' + clockLabel(order.orderedAt) + ' 주문 · ' + UI.timeAgoLabel(order.orderedAt) + '</div>' +
+          UI.phoneRowHtml(order) +
+          '<div class="order-card-time">' + UI.clockLabel(order.orderedAt) + ' 주문 · ' + UI.timeAgoLabel(order.orderedAt) + '</div>' +
           '<div class="order-card-amount">' + UI.formatWon(order.totalAmount) + '</div>' +
           (isCanceled ? '<div class="order-card-cancel-reason">취소 사유: ' + UI.escapeHtml(order.cancelReason || '-') + '</div>' : '') +
         '</div>' +
@@ -289,7 +219,7 @@
       var sorted = filtered.slice().sort(function (a, b) {
         return new Date(a.orderedAt) - new Date(b.orderedAt);
       });
-      return groupByBucket(sorted);
+      return UI.groupByBucket(sorted);
     }
 
     function renderOfflineBanner() {
@@ -443,7 +373,7 @@
               '<label class="group-select-all-label"><input type="checkbox" data-action="select-all-group" data-bucket="' + g.key + '" ' +
                 (allSelected ? 'checked' : '') + ' /></label>' +
               '<span class="time-bucket-title" data-action="toggle-group" data-bucket="' + g.key + '">' +
-                bucketLabel(g.key) + ' · ' + g.orders.length + '건' +
+                UI.bucketLabel(g.key) + ' · ' + g.orders.length + '건' +
                 '<svg class="bucket-chevron ' + (collapsed ? '' : 'open') + '" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"/></svg>' +
               '</span>' +
             '</div>';
