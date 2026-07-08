@@ -14,6 +14,13 @@
  * 같은 카테고리 안 메뉴 순서는 카테고리 순서 변경과 동일하게 위/아래 이동 버튼으로 sortOrder를
  * 맞바꾼다(MockApi.moveMenuItem) — '전체' 탭에서는 순서를 바꿀 수 없고, 특정 카테고리 탭에서만
  * 가능하다(무엇을 기준으로 순서를 매길지 애매해지는 것을 피하기 위함).
+ *
+ * 재고 소진 자동 품절 알림: 메뉴 저장 시 재고 수량을 0으로 입력해서 자동 품절이 '방금' 발동되면
+ * (MockApi.updateMenuItem/addMenuItem의 autoSoldoutTriggered 참고), 화면 하단에 확인 버튼을
+ * 눌러야만 닫히는 알림을 띄운다(UI.showPersistentBanner — 토스트처럼 몇 초 뒤 자동으로
+ * 사라지지 않음. 사장님이 놓치면 안 되는 정보라서). 여러 메뉴가 한 번에 자동 품절되는 경우를
+ * 대비해 이름 배열을 받도록 만들었지만, 지금은 폼이 한 번에 메뉴 하나만 저장하므로 실제로는
+ * 항상 배열 길이 1로 호출된다.
  */
 (function () {
   var categories = [];
@@ -24,6 +31,11 @@
   var currentUnmount = null;
   var rootEl = null;
   var storeCache = null;
+
+  function showAutoSoldoutBanner(menuNames) {
+    var listLabel = menuNames.map(function (n) { return UI.escapeHtml(n); }).join(', ');
+    UI.showPersistentBanner('⚠️ ' + listLabel + ' 메뉴가 재고 소진으로 자동 품절 처리되었습니다.');
+  }
 
   function visibleCategories() {
     return categories.filter(function (c) { return !c.isHidden; }).sort(function (a, b) { return a.sortOrder - b.sortOrder; });
@@ -397,15 +409,6 @@
                 '<input class="input-field" id="menu-form-price" type="number" min="0" value="' + UI.escapeHtml(draftMenu.price) + '" placeholder="0" />' +
               '</div>' +
               '<div class="input-group">' +
-                '<label class="input-label">재고 수량 (선택)</label>' +
-                '<input class="input-field" id="menu-form-stock" type="number" min="0" value="' + UI.escapeHtml(draftMenu.stockQuantity) + '" placeholder="무제한" />' +
-                '<div class="char-counter" style="text-align:left;">비워두면 재고 관리를 하지 않는 메뉴(무제한)로 처리돼요.</div>' +
-              '</div>' +
-              '<div class="input-group">' +
-                '<label class="input-label">원산지 (선택)</label>' +
-                '<input class="input-field" id="menu-form-origin" maxlength="30" value="' + UI.escapeHtml(draftMenu.origin) + '" placeholder="예: 콜롬비아산 원두" />' +
-              '</div>' +
-              '<div class="input-group">' +
                 '<label class="input-label">설명 (선택)</label>' +
                 '<textarea class="input-field" id="menu-form-description" maxlength="200">' + UI.escapeHtml(draftMenu.description) + '</textarea>' +
                 '<div class="char-counter" id="menu-form-desc-counter">' + draftMenu.description.length + '/200</div>' +
@@ -416,6 +419,15 @@
                   '<input class="input-field" id="menu-form-image-url" placeholder="이미지 URL 붙여넣기" value="' + UI.escapeHtml(draftMenu.imageUrl && draftMenu.imageUrl.indexOf('data:') !== 0 ? draftMenu.imageUrl : '') + '" />' +
                   '<input type="file" id="menu-form-image-file" accept="image/*" />' +
                 '</div>' +
+              '</div>' +
+              '<div class="input-group">' +
+                '<label class="input-label">재고 수량 (선택)</label>' +
+                '<input class="input-field" id="menu-form-stock" type="number" min="0" value="' + UI.escapeHtml(draftMenu.stockQuantity) + '" placeholder="무제한" />' +
+                '<div class="char-counter" style="text-align:left;">비워두면 재고 관리를 하지 않는 메뉴(무제한)로 처리돼요.</div>' +
+              '</div>' +
+              '<div class="input-group">' +
+                '<label class="input-label">원산지 (선택)</label>' +
+                '<input class="input-field" id="menu-form-origin" maxlength="30" value="' + UI.escapeHtml(draftMenu.origin) + '" placeholder="예: 콜롬비아산 원두" />' +
               '</div>' +
               '<div class="input-group">' +
                 '<div class="toggle-row">' +
@@ -703,10 +715,13 @@
         };
         var promise = editingMenuId ? MockApi.updateMenuItem(editingMenuId, payload) : MockApi.addMenuItem(payload);
         promise.then(
-          function () {
+          function (res) {
             closeModal();
             UI.showToast(editingMenuId ? '메뉴를 수정했습니다' : '메뉴를 등록했습니다');
             loadAndRender();
+            if (res.autoSoldoutTriggered) {
+              showAutoSoldoutBanner([payload.name]);
+            }
           },
           function (err) { showFormError(err.message || '저장 중 오류가 발생했습니다'); }
         );

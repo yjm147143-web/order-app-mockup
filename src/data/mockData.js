@@ -8,7 +8,7 @@
  *                (행사 1개는 매장을 여러 개 포함하고, 매장은 정확히 1개의 행사에 소속된다 — Store.eventId 참고)
  * - Store: id, name, address, phone, operatingStatus(CLOSED|OPEN|PAUSED), businessHours,
  *          autoSoldoutOnZeroStock, autoAcceptOrders, waitTimeGuideEnabled, waitTimeMenuCountUnit,
- *          waitTimeMinutesPerUnit, eventId, boothNumber,
+ *          waitTimeMinutesPerUnit, waitTimeMaxMinutes, eventId, boothNumber,
  *          todaySalesAmount, todayOrderCount, totalSalesAmount, lastOrderAt, statusChangedAt
  *          (CLOSED=마감, OPEN=영업중, PAUSED=일시중지. 신규 주문 생성은 OPEN일 때만 허용된다.
  *           autoSoldoutOnZeroStock: 메뉴 재고가 0이 되면 자동으로 품절 처리할지 여부, 기본값 true.
@@ -19,7 +19,9 @@
  *           현재 대기/접수 탭에 남아있는 미완료 주문의 메뉴 항목 총 수량을 기준으로 매번
  *           올림(총수량/N)×M 으로 자동 계산된다(mockApi.js getEstimatedWaitInfo 참고).
  *           waitTimeGuideEnabled: 꺼두면 고객 화면에 예상 대기시간 문구 자체를 노출하지 않는다.
- *           waitTimeMenuCountUnit(N)/waitTimeMinutesPerUnit(M): 위 계산식의 두 기준값.
+ *           waitTimeMenuCountUnit(N)/waitTimeMinutesPerUnit(M): 위 계산식의 두 기준값(5단위로만
+ *           조정). waitTimeMaxMinutes: 계산값이 이 값을 넘으면 이 값으로 고정해서 보여준다
+ *           (예: 최대 30분으로 설정해두면 계산상 45분이 나와도 "약 30분 이내"로 안내).
  *           eventId: 이 매장(부스)이 소속된 행사. boothNumber: 부스 번호(선택, 없으면 null).
  *           todaySalesAmount/todayOrderCount/totalSalesAmount: 행사 담당자용 홈 대시보드/매장
  *           현황 화면에서 쓸 목업 집계값 — 실제로는 Order 데이터에서 계산되어야 하지만, 이번
@@ -123,6 +125,7 @@
     waitTimeGuideEnabled: true,
     waitTimeMenuCountUnit: 5,
     waitTimeMinutesPerUnit: 10,
+    waitTimeMaxMinutes: 60,
     eventId: 'event-1',
     boothNumber: 'A-01',
     todaySalesAmount: 245000,
@@ -157,6 +160,7 @@
       waitTimeGuideEnabled: true,
       waitTimeMenuCountUnit: 5,
       waitTimeMinutesPerUnit: 10,
+      waitTimeMaxMinutes: 60,
       eventId: 'event-1',
       boothNumber: 'A-' + String(seq).padStart(2, '0'),
       todaySalesAmount: 60000 + idx * 41000,
@@ -195,6 +199,7 @@
       waitTimeGuideEnabled: true,
       waitTimeMenuCountUnit: 5,
       waitTimeMinutesPerUnit: 10,
+      waitTimeMaxMinutes: 60,
       eventId: 'event-2',
       boothNumber: 'B-' + String(idx + 1).padStart(2, '0'),
       todaySalesAmount: 0,

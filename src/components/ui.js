@@ -20,6 +20,10 @@
     store: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 9l1-5h14l1 5"/><path d="M4 9a2 2 0 0 0 4 0 2 2 0 0 0 4 0 2 2 0 0 0 4 0 2 2 0 0 0 4 0"/><path d="M5 9v10h14V9"/></svg>',
     search: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/></svg>',
     clock: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 3"/></svg>',
+    filter: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 5h16l-6.5 7.5V19l-3 1.5v-8z"/></svg>',
+    sort: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M7 4v16M7 4l-3 4M7 4l3 4M17 20V4M17 20l-3-4M17 20l3-4"/></svg>',
+    box: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 8 12 3 3 8l9 5 9-5Z"/><path d="M3 8v8l9 5 9-5V8"/><path d="M12 13v8"/></svg>',
+    bolt: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M13 2 4 14h6l-1 8 9-12h-6l1-8Z"/></svg>',
   };
 
   function escapeHtml(str) {
@@ -160,6 +164,41 @@
     el.classList.remove('show');
     setTimeout(function () {
       var host = document.getElementById('banner-host');
+      if (host) host.innerHTML = '';
+    }, 200);
+  }
+
+  /*
+   * 화면 하단 고정 알림 — 토스트/배너와 달리 타이머로 자동으로 사라지지 않고, 사장님이 '확인'
+   * 버튼을 직접 눌러야만 닫힌다(예: 재고 소진 자동 품절처럼 놓치면 안 되는 알림용).
+   * messageHtml은 호출부가 이미 이스케이프해 만든 신뢰된 HTML 문자열을 그대로 받는다
+   * (여러 항목을 줄바꿈/목록으로 모아 보여줘야 하는 경우가 있어 순수 텍스트로 제한하지 않았다).
+   */
+  function showPersistentBanner(messageHtml, opts) {
+    opts = opts || {};
+    var host = document.getElementById('persistent-banner-host');
+    if (!host) return;
+    host.innerHTML =
+      '<div class="persistent-banner" id="persistent-banner-el">' +
+        '<div class="persistent-banner-message">' + messageHtml + '</div>' +
+        button({ label: opts.confirmLabel || '확인', action: 'persistent-banner-confirm', variant: 'primary' }) +
+      '</div>';
+    var el = document.getElementById('persistent-banner-el');
+    requestAnimationFrame(function () {
+      el.classList.add('show');
+    });
+    el.querySelector('[data-action="persistent-banner-confirm"]').addEventListener('click', function () {
+      hidePersistentBanner();
+      if (opts.onConfirm) opts.onConfirm();
+    });
+  }
+
+  function hidePersistentBanner() {
+    var el = document.getElementById('persistent-banner-el');
+    if (!el) return;
+    el.classList.remove('show');
+    setTimeout(function () {
+      var host = document.getElementById('persistent-banner-host');
       if (host) host.innerHTML = '';
     }, 200);
   }
@@ -375,10 +414,12 @@
   function pickupBlockHtml(order) {
     var isTable = order.receiveType === 'TABLE_SERVICE';
     var label = isTable ? '테이블' : '픽업번호';
-    var value = isTable ? order.tableOrPickupNo : order.customerPhone ? order.customerPhone.replace(/\D/g, '').slice(-4) : '----';
+    // 예전엔 픽업번호 대신 고객 전화번호 뒷자리 4개를 대신 보여주고 있었는데, 픽업번호 검색은
+    // order.tableOrPickupNo(실제 발권번호)를 기준으로 동작해서 화면에 보이는 값과 검색으로
+    // 찾아지는 값이 서로 달라 혼란스러운 버그였다 — 항상 실제 tableOrPickupNo를 그대로 보여준다.
     return (
       '<div class="order-card-pickup-block"><div class="pickup-label">' + label + '</div><div class="pickup-value">' +
-      escapeHtml(value) + '</div></div>'
+      escapeHtml(order.tableOrPickupNo || '-') + '</div></div>'
     );
   }
 
@@ -446,6 +487,8 @@
     topBar: topBar,
     showToast: showToast,
     showBanner: showBanner,
+    showPersistentBanner: showPersistentBanner,
+    hidePersistentBanner: hidePersistentBanner,
     segmentTabs: segmentTabs,
     confirmModalHtml: confirmModalHtml,
     barChartSvg: barChartSvg,

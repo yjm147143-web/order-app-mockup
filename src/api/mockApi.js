@@ -63,12 +63,13 @@
  */
 
 (function () {
-  var DB_KEY = 'sajang-app-mock-db-v13'; // v11: 주문 화면 상단 재배치 — Order.paymentMethod 실제 필드 추가,
+  var DB_KEY = 'sajang-app-mock-db-v14'; // v11: 주문 화면 상단 재배치 — Order.paymentMethod 실제 필드 추가,
                                           // 매출 집계(PAYMENT)도 해시 흉내 대신 이 필드를 직접 집계하도록 변경
                                           // v12: Order.orderType(포장|다회용기|체험) 추가, Store.autoAcceptOrders 추가
                                           // v13: Store.estimatedWaitMinutes -> waitTimeGuideEnabled/waitTimeMenuCountUnit/
                                           // waitTimeMinutesPerUnit 계산식으로 교체, MenuItem.origin 추가, STAFF 계정
                                           // isActive/permissions 추가
+                                          // v14: Store.waitTimeMaxMinutes 추가(예상 대기시간 상한 고정값)
   var LATENCY_MS = 300;
 
   function deepClone(obj) {
@@ -241,14 +242,19 @@
    * 재고 수량이 0으로 설정되고 매장의 autoSoldoutOnZeroStock이 켜져 있으면 자동으로 품절 처리한다.
    * stockQuantity가 null(무제한)이거나 0보다 크면 건드리지 않는다(자동으로 품절 해제하지는 않음 —
    * 품절 해제는 사장님이 직접 토글해야 한다).
+   * 반환값: 이번 호출로 '방금' isSoldout이 false -> true로 바뀌었으면 true(자동 품절 알림 배너용),
+   * 이미 품절 상태였거나 이번에 자동 품절이 발생하지 않았으면 false.
    */
   function applyAutoSoldout(menuItem) {
-    if (menuItem.stockQuantity !== 0) return;
+    if (menuItem.stockQuantity !== 0) return false;
+    if (menuItem.isSoldout) return false;
     var category = db.menuCategories.find(function (c) { return c.id === menuItem.categoryId; });
     var store = category && findStore(category.storeId);
     if (store && store.autoSoldoutOnZeroStock) {
       menuItem.isSoldout = true;
+      return true;
     }
+    return false;
   }
 
   var MockApi = {
@@ -585,14 +591,15 @@
       return withLatency({ store: store });
     },
 
-    /** PATCH /stores/:storeId/estimated-wait-minutes — 5분 단위로 사장님이 직접 조정하는 매장 전체 공통 예상 대기시간 */
+    /** PATCH /stores/:storeId/wait-time-config — 5분 단위로 사장님이 직접 조정하는 매장 전체 공통 예상 대기시간 기준값 */
     updateWaitTimeConfig: function (storeId, config) {
       var store = findStore(storeId);
       if (!store) {
         return withLatency({ message: '매장을 찾을 수 없습니다.' }, true);
       }
-      if (config.menuCountUnit !== undefined) store.waitTimeMenuCountUnit = Math.max(1, config.menuCountUnit);
-      if (config.minutesPerUnit !== undefined) store.waitTimeMinutesPerUnit = Math.max(1, config.minutesPerUnit);
+      if (config.menuCountUnit !== undefined) store.waitTimeMenuCountUnit = Math.max(5, config.menuCountUnit);
+      if (config.minutesPerUnit !== undefined) store.waitTimeMinutesPerUnit = Math.max(5, config.minutesPerUnit);
+      if (config.maxMinutes !== undefined) store.waitTimeMaxMinutes = Math.max(5, config.maxMinutes);
       if (config.guideEnabled !== undefined) store.waitTimeGuideEnabled = !!config.guideEnabled;
       saveDB(db);
       return withLatency({ store: store });
@@ -602,6 +609,9 @@
      * GET /stores/:storeId/estimated-wait-info
      * 현재 대기(WAITING)/접수(RECEIVED) 탭에 남아있는 미완료 주문의 메뉴 항목 총 수량을 기준으로
      * 올림(총수량 / N) × M 분으로 예상 대기시간을 계산한다. 완료/취소된 주문은 집계에서 제외한다.
+     * waitTimeMaxMinutes가 설정되어 있고 계산값이 이를 넘으면 그 최댓값으로 고정한다
+     * (rawEstimatedMinutes에는 고정 전 원래 계산값을, estimatedMinutes에는 고정 후 최종
+     * 표시값을 담아 화면에서 "원래는 얼마인데 최대치로 고정됐다"는 설명을 만들 수 있게 한다).
      */
     getEstimatedWaitInfo: function (storeId) {
       var store = findStore(storeId);
@@ -615,14 +625,18 @@
       var activeMenuQty = db.orderItems.reduce(function (sum, it) {
         return activeOrderIds[it.orderId] ? sum + it.quantity : sum;
       }, 0);
-      var menuCountUnit = store.waitTimeMenuCountUnit || 1;
-      var minutesPerUnit = store.waitTimeMinutesPerUnit || 0;
-      var estimatedMinutes = activeMenuQty === 0 ? 0 : Math.ceil(activeMenuQty / menuCountUnit) * minutesPerUnit;
+      var menuCountUnit = store.waitTimeMenuCountUnit || 5;
+      var minutesPerUnit = store.waitTimeMinutesPerUnit || 5;
+      var maxMinutes = store.waitTimeMaxMinutes || null;
+      var rawEstimatedMinutes = activeMenuQty === 0 ? 0 : Math.ceil(activeMenuQty / menuCountUnit) * minutesPerUnit;
+      var estimatedMinutes = maxMinutes && rawEstimatedMinutes > maxMinutes ? maxMinutes : rawEstimatedMinutes;
       return withLatency({
         guideEnabled: !!store.waitTimeGuideEnabled,
         menuCountUnit: menuCountUnit,
         minutesPerUnit: minutesPerUnit,
+        maxMinutes: maxMinutes,
         activeMenuQty: activeMenuQty,
+        rawEstimatedMinutes: rawEstimatedMinutes,
         estimatedMinutes: estimatedMinutes,
       });
     },
@@ -810,11 +824,11 @@
         origin: payload.origin || '',
         optionGroups: payload.optionGroups || [],
       };
-      applyAutoSoldout(menuItem);
+      var autoSoldoutTriggered = applyAutoSoldout(menuItem);
       db.menuItems.push(menuItem);
       saveDB(db);
       emit('mock:menu-changed', {});
-      return withLatency({ menuItem: menuItem });
+      return withLatency({ menuItem: menuItem, autoSoldoutTriggered: autoSoldoutTriggered });
     },
 
     /**
@@ -832,10 +846,10 @@
       ['categoryId', 'name', 'description', 'price', 'imageUrl', 'isVisible', 'stockQuantity', 'origin', 'optionGroups'].forEach(function (key) {
         if (payload[key] !== undefined) menuItem[key] = payload[key];
       });
-      applyAutoSoldout(menuItem);
+      var autoSoldoutTriggered = applyAutoSoldout(menuItem);
       saveDB(db);
       emit('mock:menu-changed', {});
-      return withLatency({ menuItem: menuItem });
+      return withLatency({ menuItem: menuItem, autoSoldoutTriggered: autoSoldoutTriggered });
     },
 
     /** PATCH /menu-items/:menuItemId/soldout */
@@ -1028,7 +1042,13 @@
         return withLatency({ message: '주문 가능한 메뉴가 없습니다.' }, true);
       }
       var channel = Math.random() < 0.5 ? 'QR' : 'TABLET';
-      var receiveType = Math.random() < 0.5 ? 'TABLE_SERVICE' : 'COUNTER_PICKUP';
+      // 야외 행사에서는 테이블 서비스보다 카운터 픽업이 훨씬 흔해서 90%/10%로 비율을 맞춘다.
+      var receiveType = Math.random() < 0.9 ? 'COUNTER_PICKUP' : 'TABLE_SERVICE';
+      // 테이블 번호는 실제 매장 테이블 수만큼(1~20)이면 충분하지만, 픽업번호는 발권기 티켓처럼
+      // 4자리로 뽑히는 게 자연스러워서 방식에 따라 자릿수를 다르게 생성한다.
+      var tableOrPickupNo = receiveType === 'TABLE_SERVICE'
+        ? String(1 + Math.floor(Math.random() * 20))
+        : String(1000 + Math.floor(Math.random() * 9000));
       var itemCount = 1 + Math.floor(Math.random() * 3);
       var chosenItems = [];
       for (var i = 0; i < itemCount; i++) {
@@ -1061,7 +1081,7 @@
         channel: channel,
         receiveType: receiveType,
         orderType: orderType,
-        tableOrPickupNo: String(1 + Math.floor(Math.random() * 20)),
+        tableOrPickupNo: tableOrPickupNo,
         customerPhone: phone,
         customerName: null,
         status: autoAccept ? 'RECEIVED' : 'WAITING',

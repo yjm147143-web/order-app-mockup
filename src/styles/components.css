@@ -434,6 +434,74 @@
   flex-shrink: 0;
 }
 
+/* ---------- 확인 눌러야만 닫히는 하단 고정 알림(자동 품절 등) — 타이머로 사라지지 않음 ---------- */
+.persistent-banner-host {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  padding: 0 16px 16px;
+  pointer-events: none;
+  z-index: 95;
+}
+
+.persistent-banner {
+  pointer-events: auto;
+  background: var(--color-white);
+  border: 1.5px solid var(--color-accent-red);
+  border-radius: 16px;
+  padding: 16px;
+  box-shadow: 0 -8px 24px rgba(0,0,0,0.18);
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  opacity: 0;
+  transform: translateY(16px);
+  transition: opacity 0.2s ease, transform 0.2s ease;
+}
+
+.persistent-banner.show {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+.persistent-banner-message {
+  font-size: 14px;
+  font-weight: 700;
+  line-height: 1.5;
+  text-align: left;
+}
+
+.persistent-banner .btn {
+  width: 100%;
+}
+
+/* ---------- 개발자 옵션 핀 버튼 (화면 어디서든 우하단에 항상 떠 있음) ---------- */
+.dev-pin-host {
+  position: absolute;
+  right: 16px;
+  bottom: 20px;
+  z-index: 65;
+  pointer-events: none;
+}
+
+.dev-pin-btn {
+  pointer-events: auto;
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  border: none;
+  background: var(--color-text-primary);
+  color: var(--color-white);
+  font-size: 18px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  box-shadow: 0 4px 14px rgba(0,0,0,0.3);
+  opacity: 0.85;
+}
+
 /* ---------- 영업 종료 안내 배너 (주문 수신함 상단, 고정) ---------- */
 .closed-banner {
   display: flex;
@@ -498,11 +566,13 @@
 .channel-badge {
   display: inline-flex;
   align-items: center;
-  padding: 4px 10px;
+  height: 26px;
+  padding: 0 10px;
   border-radius: var(--radius-pill);
   font-size: 12px;
   font-weight: 800;
   white-space: nowrap;
+  box-sizing: border-box;
 }
 
 .channel-qr {
@@ -516,17 +586,20 @@
   color: var(--color-white);
 }
 
+/* 채널 뱃지(위)와 높이·폰트를 완전히 동일하게 맞춘다 — 이모지가 섞인 채널 뱃지는 줄높이가
+   미묘하게 더 커서 padding만으로는 정확히 안 맞아 height를 직접 고정했다(디자인 리뷰 발견 사항). */
 .order-type-pill {
   display: inline-flex;
   align-items: center;
-  padding: 3px 9px;
-  margin-left: 6px;
+  height: 26px;
+  padding: 0 9px;
   border-radius: var(--radius-pill);
   font-size: 12px;
   font-weight: 800;
   white-space: nowrap;
   background: var(--color-white);
   border: 1.5px solid;
+  box-sizing: border-box;
 }
 
 .order-type-packaging {
@@ -638,27 +711,14 @@
   flex: 1;
 }
 
-.order-card-expand-toggle {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 4px;
-  margin-top: var(--space-2);
-  padding: 6px 0;
-  color: var(--color-text-secondary);
-  font-size: var(--font-size-caption);
-  font-weight: 600;
-  cursor: pointer;
-}
-
-.order-card-expand-toggle svg {
-  width: 14px;
-  height: 14px;
-  transition: transform 0.15s ease;
-}
-
-.order-card.expanded .order-card-expand-toggle svg {
-  transform: rotate(180deg);
+/* '되돌리기'(.btn-outline)는 완료 탭 카드 배경(연회색/취소 시 연분홍)과 거의 같은 색이라
+   투명 배경 + 옅은 테두리로는 안 보이는 문제가 있었다 — 흰 배경 + 굵은 블랙 테두리로 바꿔
+   카드 배경과 뚜렷이 구분되게 한다. 모달/설정 화면 등 다른 곳의 .btn-outline(흰 배경 위)은
+   그대로 둔다. */
+.order-card-actions .btn-outline {
+  background: var(--color-white);
+  border: 1.5px solid var(--color-text-primary);
+  color: var(--color-text-primary);
 }
 
 .order-card-expand {
@@ -823,19 +883,71 @@
   font-size: var(--font-size-body);
 }
 
-.order-menu-filter-row {
-  padding: 0 20px 4px;
+.order-filter-sort-row {
+  display: flex;
+  gap: 8px;
+  padding: 0 20px 8px;
 }
 
-.order-menu-filter-row select {
-  width: 100%;
-  padding: 9px 12px;
+.filter-pill-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 44px;
+  padding: 8px 14px;
   border-radius: var(--radius-button);
   border: 1px solid var(--color-divider);
   background: var(--color-white);
   font-size: var(--font-size-caption);
+  font-weight: 700;
+  color: var(--color-text-primary);
+  cursor: pointer;
+}
+
+.filter-pill-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.filter-pill-btn svg {
+  width: 15px;
+  height: 15px;
+  flex-shrink: 0;
+}
+
+.filter-sheet-list {
+  display: flex;
+  flex-direction: column;
+}
+
+.filter-sheet-option {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  min-height: 52px;
+  padding: 12px 4px;
+  border: none;
+  border-bottom: 1px solid var(--color-divider);
+  background: transparent;
+  font-size: var(--font-size-body);
   font-weight: 600;
   color: var(--color-text-primary);
+  text-align: left;
+  cursor: pointer;
+}
+
+.filter-sheet-option:last-child {
+  border-bottom: none;
+}
+
+.filter-sheet-option.selected {
+  font-weight: 800;
+}
+
+.filter-sheet-check {
+  color: var(--color-text-primary);
+  font-weight: 800;
 }
 
 /* ---------- Modal (확인/알림 팝업은 화면 정중앙에 뜨는 것이 기본형) ---------- */
@@ -860,7 +972,8 @@
   overflow: hidden;
 }
 
-/* 예외: 메뉴 등록/수정 폼은 기존 하단 시트 형태를 그대로 유지한다 */
+/* 기본형은 화면 정중앙 팝업이지만, 바텀시트가 필요한 곳(메뉴 등록/수정 폼, 주문 화면의
+   메뉴 필터 선택 시트 등)은 이 클래스를 추가로 붙여 하단에서 올라오는 형태로 바꾼다 */
 .modal-overlay-bottom {
   align-items: flex-end;
   padding: 0;
@@ -1060,16 +1173,33 @@
   display: flex;
   align-items: center;
   flex-wrap: wrap;
-  gap: 8px;
+  gap: 10px;
   font-size: 15px;
   font-weight: 600;
+  margin-bottom: 4px;
 }
 
-.wait-config-input {
-  width: 64px;
+.wait-config-row:last-child {
+  margin-bottom: 0;
+}
+
+.wait-select {
+  width: auto;
   flex: none;
+  min-width: 76px;
   text-align: center;
-  padding: 8px 6px;
+  padding: 9px 10px;
+}
+
+.wait-settings-disabled {
+  opacity: 0.4;
+  pointer-events: none;
+}
+
+.wait-calc-actual-box {
+  padding: 14px;
+  border-radius: 12px;
+  border: 1.5px solid var(--color-text-primary);
 }
 
 /* 카테고리 관리 모달 */
@@ -1448,6 +1578,7 @@ select.input-field {
 }
 
 /* ---------- 주문 화면: 오프라인 배너 ---------- */
+/* 야외 행사에서 오프라인은 치명적인 문제라 검정이 아닌 포인트 레드로 확실히 눈에 띄게 한다 */
 .offline-banner {
   display: flex;
   align-items: center;
@@ -1455,7 +1586,7 @@ select.input-field {
   margin: 0 var(--space-5) var(--space-3);
   padding: 12px 14px;
   border-radius: var(--radius-card);
-  background: var(--color-text-primary);
+  background: var(--color-accent-red);
   color: var(--color-white);
   font-size: var(--font-size-caption);
   font-weight: 700;

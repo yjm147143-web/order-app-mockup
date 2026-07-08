@@ -2,16 +2,16 @@
  * 설정 화면 — 앱 어디서든(현재는 '주문' 화면 상단 고정 아이콘) 같은 위치에서 진입한다.
  * 실제 이전 시: features/settings/screens/SettingsScreen.tsx
  *
- * 최상단: 영업상태 카드(CLOSED/OPEN/PAUSED 3단계, 버튼 클릭 시 확인 팝업 후 전환).
- * 그 아래: 재고 소진 시 자동 품절 토글, 자동 수락 토글, 예상 대기시간 관리(→ waitTimeSettings 화면),
- * 메뉴 추가 및 수정(→ menu 화면), 매출 조회(→ sales 화면), 직원 계정 관리(→ staffAccounts 화면),
- * QR 메뉴판 보기(→ qrMenu 화면), 로그아웃.
- * 매장 정보 카드는 목록 맨 아래(개발자 옵션 바로 위)에 둔다 — 자주 안 바뀌는 정보라 자주 쓰는
- * 설정 항목들보다 아래로 내렸다.
+ * 목록 순서(고정): 영업상태 카드 → 메뉴 추가 및 수정 → 예상 대기시간 관리 → 매출 조회 →
+ * 직원 계정 관리 → QR 메뉴판 보기 → 재고 소진 시 자동 품절 → 자동 수락 → 매장 정보 → 로그아웃.
+ * '재고 소진 시 자동 품절'/'자동 수락'은 각각 다른 화면에 묻혀있던 토글이 아니라 이 화면
+ * 리스트에 눈에 보이는 독립 항목으로 승격되어 있다 — 리스트 행 그대로에 토글을 붙인 형태
+ * (`.settings-list-item`에서 트레일링 요소만 chevron 대신 토글로 바꿈, 행 전체를 눌러도
+ * 토글되도록 클릭 핸들러를 행에 붙였다).
  * (카테고리 관리는 여기 두지 않는다 — 메뉴 관리 화면 자체의 상단에 있음. menu.js 참고)
- * 맨 아래: 개발자 옵션(디버그) — 오프라인 시뮬레이션 토글 + 테스트 주문 5건 생성 버튼.
- * AppState.isOffline 은 세션 간 유지되지 않고 새로고침하면 항상 false로 초기화된다
- * (테스트 중 켜둔 채 잊어버리는 것 방지).
+ *
+ * 개발자 옵션(오프라인 시뮬레이션 토글, 테스트 주문 생성 버튼)은 이 리스트에서 완전히 뺐다 —
+ * 화면 어디서든 항상 떠 있는 우하단 핀 버튼으로 옮겼다(src/components/devOptionsPanel.js 참고).
  */
 (function () {
   var STATUS_META = {
@@ -52,32 +52,14 @@
             '<div class="operating-status-desc" id="operating-status-desc"></div>' +
             '<div class="operating-status-actions" id="operating-status-actions"></div>' +
           '</div>' +
-          '<div class="card" style="margin-bottom:16px;">' +
-            '<div class="toggle-row">' +
-              '<div>' +
-                '<div style="font-weight:700;font-size:15px;">재고 소진 시 자동 품절</div>' +
-                '<div style="font-size:13px;color:var(--color-text-secondary);margin-top:2px;">메뉴 재고가 0개가 되면 자동으로 품절 처리해요</div>' +
-              '</div>' +
-              UI.toggle(true, 'toggle-auto-soldout') +
-            '</div>' +
-          '</div>' +
-          '<div class="card" style="margin-bottom:16px;">' +
-            '<div class="toggle-row">' +
-              '<div>' +
-                '<div style="font-weight:700;font-size:15px;">자동 수락</div>' +
-                '<div style="font-size:13px;color:var(--color-text-secondary);margin-top:2px;">켜두면 신규 주문이 대기 탭을 거치지 않고 바로 접수 탭으로 들어와요</div>' +
-              '</div>' +
-              UI.toggle(false, 'toggle-auto-accept') +
-            '</div>' +
+          '<div class="settings-list-item" data-action="go-menu">' +
+            '<span class="settings-list-icon">' + UI.Icons.menu + '</span>' +
+            '<span class="settings-list-label">메뉴 추가 및 수정</span>' +
+            '<span class="settings-list-chevron">' + UI.Icons.chevronRight + '</span>' +
           '</div>' +
           '<div class="settings-list-item" data-action="go-wait-time">' +
             '<span class="settings-list-icon">' + UI.Icons.clock + '</span>' +
             '<span class="settings-list-label">예상 대기시간 관리</span>' +
-            '<span class="settings-list-chevron">' + UI.Icons.chevronRight + '</span>' +
-          '</div>' +
-          '<div class="settings-list-item" data-action="go-menu">' +
-            '<span class="settings-list-icon">' + UI.Icons.menu + '</span>' +
-            '<span class="settings-list-label">메뉴 추가 및 수정</span>' +
             '<span class="settings-list-chevron">' + UI.Icons.chevronRight + '</span>' +
           '</div>' +
           '<div class="settings-list-item" data-action="go-sales">' +
@@ -95,30 +77,23 @@
             '<span class="settings-list-label">QR 메뉴판 보기</span>' +
             '<span class="settings-list-chevron">' + UI.Icons.chevronRight + '</span>' +
           '</div>' +
-          '<hr class="divider" />' +
-          '<div style="display:flex;justify-content:center;margin-bottom:24px;">' +
-            UI.button({ label: '로그아웃', action: 'logout', variant: 'outline' }) +
+          '<div class="settings-list-item" data-action="toggle-auto-soldout-row">' +
+            '<span class="settings-list-icon">' + UI.Icons.box + '</span>' +
+            '<span class="settings-list-label">재고 소진 시 자동 품절</span>' +
+            UI.toggle(true, 'toggle-auto-soldout') +
+          '</div>' +
+          '<div class="settings-list-item" data-action="toggle-auto-accept-row">' +
+            '<span class="settings-list-icon">' + UI.Icons.bolt + '</span>' +
+            '<span class="settings-list-label">자동 수락</span>' +
+            UI.toggle(false, 'toggle-auto-accept') +
           '</div>' +
           '<div class="card" id="store-info-card" style="margin-bottom:16px;">' +
             '<div style="font-size:13px;color:var(--color-text-secondary);margin-bottom:8px;">매장 정보</div>' +
             '<div id="store-info-body" style="font-size:15px;line-height:1.7;">불러오는 중...</div>' +
           '</div>' +
-          '<div class="debug-section">' +
-            '<div class="debug-section-title">개발자 옵션</div>' +
-            '<div class="card" style="margin-bottom:12px;">' +
-              '<div class="toggle-row">' +
-                '<div>' +
-                  '<div style="font-weight:700;font-size:14px;">오프라인 시뮬레이션</div>' +
-                  '<div style="font-size:12px;color:var(--color-text-secondary);margin-top:2px;">주문 화면에서 연결이 끊긴 상태를 흉내내요(디버그용)</div>' +
-                '</div>' +
-                UI.toggle(false, 'toggle-offline-sim') +
-              '</div>' +
-            '</div>' +
-            '<div class="card">' +
-              '<div style="font-weight:700;font-size:14px;margin-bottom:4px;">테스트 주문 생성</div>' +
-              '<div style="font-size:12px;color:var(--color-text-secondary);margin-bottom:10px;">무작위 신규 주문 5건을 즉시 만들어요(영업 중일 때만 생성돼요)</div>' +
-              UI.button({ label: '주문 넣기', action: 'add-test-orders', variant: 'secondary' }) +
-            '</div>' +
+          '<hr class="divider" />' +
+          '<div style="display:flex;justify-content:center;margin-bottom:24px;">' +
+            UI.button({ label: '로그아웃', action: 'logout', variant: 'outline' }) +
           '</div>' +
         '</div>' +
         '<div id="settings-modal-host"></div>' +
@@ -194,8 +169,8 @@
 
       var autoSoldoutToggle = root.querySelector('[data-action="toggle-auto-soldout"]');
       autoSoldoutToggle.classList.toggle('on', s.autoSoldoutOnZeroStock !== false);
-      autoSoldoutToggle.addEventListener('click', function () {
-        var next = !this.classList.contains('on');
+      root.querySelector('[data-action="toggle-auto-soldout-row"]').addEventListener('click', function () {
+        var next = !autoSoldoutToggle.classList.contains('on');
         MockApi.setAutoSoldoutOnZeroStock(state.currentStoreId, next).then(function (r) {
           autoSoldoutToggle.classList.toggle('on', r.store.autoSoldoutOnZeroStock);
           UI.showToast(r.store.autoSoldoutOnZeroStock ? '재고 소진 시 자동 품절을 켰어요' : '재고 소진 시 자동 품절을 껐어요');
@@ -204,46 +179,12 @@
 
       var autoAcceptToggle = root.querySelector('[data-action="toggle-auto-accept"]');
       autoAcceptToggle.classList.toggle('on', !!s.autoAcceptOrders);
-      autoAcceptToggle.addEventListener('click', function () {
-        var next = !this.classList.contains('on');
+      root.querySelector('[data-action="toggle-auto-accept-row"]').addEventListener('click', function () {
+        var next = !autoAcceptToggle.classList.contains('on');
         MockApi.setAutoAcceptOrders(state.currentStoreId, next).then(function (r) {
           autoAcceptToggle.classList.toggle('on', r.store.autoAcceptOrders);
           UI.showToast(r.store.autoAcceptOrders ? '자동 수락을 켰어요' : '자동 수락을 껐어요 · 수동 수락으로 바뀌었어요');
         });
-      });
-    });
-
-    var offlineToggle = root.querySelector('[data-action="toggle-offline-sim"]');
-    offlineToggle.classList.toggle('on', AppState.get().isOffline);
-    offlineToggle.addEventListener('click', function () {
-      var next = !this.classList.contains('on');
-      AppState.setOffline(next);
-      this.classList.toggle('on', next);
-      UI.showToast(next ? '오프라인 상태를 흉내내기 시작했어요' : '온라인 상태로 돌아왔어요');
-    });
-
-    root.querySelector('[data-action="add-test-orders"]').addEventListener('click', function () {
-      var btn = this;
-      var storeId = state.currentStoreId;
-      btn.disabled = true;
-
-      function createOne(remaining, successCount) {
-        if (remaining <= 0) return Promise.resolve(successCount);
-        return MockApi.createRandomOrder(storeId).then(
-          function () { return createOne(remaining - 1, successCount + 1); },
-          function () { return createOne(remaining - 1, successCount); }
-        );
-      }
-
-      createOne(5, 0).then(function (successCount) {
-        btn.disabled = false;
-        if (successCount === 5) {
-          UI.showToast('신규 주문 5건을 넣었어요');
-        } else if (successCount > 0) {
-          UI.showToast(successCount + '건만 생성했어요 · 영업 중이 아니면 생성되지 않아요');
-        } else {
-          UI.showToast('주문을 생성하지 못했어요 · 영업 중 상태에서만 가능해요');
-        }
       });
     });
 
