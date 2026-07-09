@@ -1,0 +1,26 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>주문 — 대기 탭 — 기획 주석 보드</title>
+<link rel="stylesheet" href="../board.css" />
+</head>
+<body>
+<div class="crumbs" style="display:flex;gap:16px;align-items:center;">
+  <a href="index.html">전체 화면 목록</a>
+  <a href="02-storeSelect.html">&larr; 매장 선택</a>
+  <a href="04-customers-received.html" style="margin-left:auto;">주문 — 접수 탭 &rarr;</a>
+</div>
+<div id="board-root"></div>
+<script src="../screens.js"></script>
+<script src="../details.js"></script>
+<script src="../render.js"></script>
+<script>
+  var screen = window.SCREENS.find(function (s) { return s.key === 'customers-waiting'; });
+  var root = document.getElementById('board-root');
+  root.innerHTML = window.DescBoard.screenBlockHtml(screen, '../');
+  window.DescBoard.restoreMemos(root);
+</script>
+</body>
+</html>

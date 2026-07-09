@@ -1,0 +1,26 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>메뉴 등록/수정 폼 — 기획 주석 보드</title>
+<link rel="stylesheet" href="../board.css" />
+</head>
+<body>
+<div class="crumbs" style="display:flex;gap:16px;align-items:center;">
+  <a href="index.html">전체 화면 목록</a>
+  <a href="06-menu-list.html">&larr; 메뉴 관리 — 목록</a>
+  <a href="08-settings.html" style="margin-left:auto;">설정 &rarr;</a>
+</div>
+<div id="board-root"></div>
+<script src="../screens.js"></script>
+<script src="../details.js"></script>
+<script src="../render.js"></script>
+<script>
+  var screen = window.SCREENS.find(function (s) { return s.key === 'menu-form'; });
+  var root = document.getElementById('board-root');
+  root.innerHTML = window.DescBoard.screenBlockHtml(screen, '../');
+  window.DescBoard.restoreMemos(root);
+</script>
+</body>
+</html>

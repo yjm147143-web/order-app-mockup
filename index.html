@@ -60,5 +60,245 @@
 <!-- 라우터 / 부트스트랩 -->
 <script src="src/router.js"></script>
 <script src="src/main.js"></script>
+
+<!--
+  기획 주석 보드(desc/) 캡처 전용 진입점 — ?cap=<key> 가 있을 때만 동작하며 평상시 앱 동작에는
+  전혀 영향을 주지 않는다. 로그인 → 매장/행사 선택을 코드로 대신 밟아준 뒤 지정된 화면(또는 화면
+  내부의 특정 탭/모달)까지 이동시키고, 캡처가 잘리지 않도록 프레임을 실제 콘텐츠 높이만큼 늘린다.
+-->
+<script>
+(function () {
+  var m = /[?&]cap=([\w-]+)/.exec(location.search || '');
+  if (!m) return;
+  var key = m[1];
+
+  function flattenFrameForCapture() {
+    var style = document.createElement('style');
+    style.textContent =
+      'html,body{margin:0 !important;padding:0 !important;background:#fff !important;min-height:0 !important;' +
+      'justify-content:flex-start !important;align-items:flex-start !important;}' +
+      '.device-frame{position:relative !important;width:402px !important;max-width:402px !important;' +
+      'height:auto !important;max-height:none !important;margin:0 !important;border:none !important;' +
+      'border-radius:0 !important;box-shadow:none !important;overflow-x:hidden !important;overflow-y:visible !important;}' +
+      // 세로만 풀어준다 — 가로(overflow-x)는 실제 기기에서도 프레임이 잘라주는 부분이라 그대로
+      // hidden을 유지해야 캡처 화면이 실제 폰 화면과 같은 폭으로 보인다.
+      '.app-root{position:static !important;height:auto !important;overflow-x:hidden !important;overflow-y:visible !important;}' +
+      '.screen{height:auto !important;}' +
+      '.screen-scroll{overflow-x:hidden !important;overflow-y:visible !important;height:auto !important;max-height:none !important;}' +
+      // 모달(바텀시트/센터 팝업)도 캡처 시에는 뷰포트에 고정되는 오버레이가 아니라 문서 흐름 안의
+      // 일반 콘텐츠로 풀어줘야 폼 하단 필드(옵션 그룹 등)까지 잘리지 않고 프레임 높이에 반영된다.
+      '.modal-overlay{position:static !important;background:#fff !important;}' +
+      '.modal-sheet{max-height:none !important;width:100% !important;}' +
+      '.modal-sheet-body{overflow:visible !important;max-height:none !important;}';
+    document.head.appendChild(style);
+  }
+
+  function loginAs(loginId, cb) {
+    AppState.logout();
+    MockApi.login(loginId, '1234').then(function (res) {
+      AppState.login(res.user, false);
+      cb(res.user);
+    });
+  }
+
+  function ownerSetup(cb) {
+    loginAs('owner', function (user) {
+      MockApi.getMyStores(user.id).then(function (r) {
+        AppState.selectStore(r.stores[0].id);
+        cb(user, r.stores);
+      });
+    });
+  }
+
+  function managerSetup(loginId, cb) {
+    loginAs(loginId, function (user) {
+      MockApi.getMyEvents(user.id).then(function (r) {
+        AppState.selectEvent(r.events[0].id);
+        cb(user, r.events);
+      });
+    });
+  }
+
+  function click(selector) {
+    var el = document.querySelector(selector);
+    if (el) el.click();
+  }
+
+  var STEPS = {
+    login: function (done) {
+      AppState.logout();
+      Router.showScreen('login');
+      setTimeout(done, 150);
+    },
+    storeSelect: function (done) {
+      ownerSetup(function (user, stores) {
+        Router.showScreen('storeSelect', { stores: stores });
+        setTimeout(done, 150);
+      });
+    },
+    'customers-waiting': function (done) {
+      ownerSetup(function () {
+        Router.showScreen('customers');
+        setTimeout(done, 600);
+      });
+    },
+    'customers-received': function (done) {
+      ownerSetup(function () {
+        Router.showScreen('customers');
+        setTimeout(function () {
+          click('[data-action="segment-tab"][data-key="RECEIVED"]');
+          setTimeout(done, 300);
+        }, 600);
+      });
+    },
+    'customers-done': function (done) {
+      ownerSetup(function () {
+        Router.showScreen('customers');
+        setTimeout(function () {
+          click('[data-action="segment-tab"][data-key="DONE"]');
+          setTimeout(done, 300);
+        }, 600);
+      });
+    },
+    'menu-list': function (done) {
+      ownerSetup(function () {
+        Router.showScreen('menu');
+        setTimeout(done, 400);
+      });
+    },
+    'menu-form': function (done) {
+      ownerSetup(function () {
+        Router.showScreen('menu');
+        setTimeout(function () {
+          click('[data-action="add-menu"]');
+          setTimeout(done, 250);
+        }, 400);
+      });
+    },
+    settings: function (done) {
+      ownerSetup(function () {
+        Router.showScreen('settings');
+        setTimeout(done, 300);
+      });
+    },
+    waitTimeSettings: function (done) {
+      ownerSetup(function () {
+        Router.showScreen('waitTimeSettings');
+        setTimeout(done, 300);
+      });
+    },
+    'sales-hub': function (done) {
+      ownerSetup(function () {
+        Router.showScreen('sales', { reset: true });
+        setTimeout(done, 300);
+      });
+    },
+    'sales-detail': function (done) {
+      ownerSetup(function () {
+        Router.showScreen('sales', { reset: true });
+        setTimeout(function () {
+          click('[data-action="open-dimension"][data-key="PERIOD"]');
+          setTimeout(done, 400);
+        }, 300);
+      });
+    },
+    staffAccounts: function (done) {
+      ownerSetup(function () {
+        Router.showScreen('staffAccounts');
+        setTimeout(done, 300);
+      });
+    },
+    qrMenu: function (done) {
+      ownerSetup(function () {
+        Router.showScreen('qrMenu');
+        setTimeout(done, 400);
+      });
+    },
+    devOptionsPanel: function (done) {
+      ownerSetup(function () {
+        Router.showScreen('customers');
+        setTimeout(function () {
+          click('[data-action="open-dev-panel"]');
+          setTimeout(done, 300);
+        }, 600);
+      });
+    },
+    eventSelect: function (done) {
+      managerSetup('manager2', function (user, events) {
+        Router.showScreen('eventSelect', { events: events });
+        setTimeout(done, 200);
+      });
+    },
+    eventManagerHome: function (done) {
+      managerSetup('manager1', function () {
+        Router.showScreen('eventManagerShell');
+        setTimeout(done, 600);
+      });
+    },
+    eventManagerStores: function (done) {
+      managerSetup('manager1', function () {
+        Router.showScreen('eventManagerShell');
+        setTimeout(function () {
+          click('[data-action="em-tab"][data-key="STORES"]');
+          setTimeout(done, 400);
+        }, 600);
+      });
+    },
+    'eventManagerSales-hub': function (done) {
+      managerSetup('manager1', function () {
+        Router.showScreen('eventManagerShell');
+        setTimeout(function () {
+          click('[data-action="em-tab"][data-key="SALES"]');
+          setTimeout(done, 400);
+        }, 600);
+      });
+    },
+    'eventManagerSales-detail': function (done) {
+      managerSetup('manager1', function () {
+        Router.showScreen('eventManagerShell');
+        setTimeout(function () {
+          click('[data-action="em-tab"][data-key="SALES"]');
+          setTimeout(function () {
+            click('[data-action="open-dimension"][data-key="STORE_RANKING"]');
+            setTimeout(done, 400);
+          }, 400);
+        }, 600);
+      });
+    },
+    eventManagerSettings: function (done) {
+      managerSetup('manager2', function () {
+        Router.showScreen('eventManagerShell');
+        setTimeout(function () {
+          click('[data-action="em-tab"][data-key="SETTINGS"]');
+          setTimeout(done, 400);
+        }, 600);
+      });
+    },
+    eventManagerStoreOrders: function (done) {
+      managerSetup('manager1', function (user, events) {
+        MockApi.getStoresByEvent(events[0].id).then(function (r) {
+          Router.showScreen('eventManagerStoreOrders', { storeId: r.stores[0].id });
+          setTimeout(done, 400);
+        });
+      });
+    },
+  };
+
+  function go() {
+    var step = STEPS[key];
+    if (!step) {
+      console.error('Unknown cap key:', key);
+      return;
+    }
+    try {
+      step(flattenFrameForCapture);
+    } catch (e) {
+      console.error(e);
+    }
+  }
+
+  document.addEventListener('DOMContentLoaded', go);
+})();
+</script>
 </body>
 </html>

@@ -1,0 +1,26 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>예상 대기시간 관리 — 기획 주석 보드</title>
+<link rel="stylesheet" href="../board.css" />
+</head>
+<body>
+<div class="crumbs" style="display:flex;gap:16px;align-items:center;">
+  <a href="index.html">전체 화면 목록</a>
+  <a href="08-settings.html">&larr; 설정</a>
+  <a href="10-sales-hub.html" style="margin-left:auto;">매출 조회 — 허브 &rarr;</a>
+</div>
+<div id="board-root"></div>
+<script src="../screens.js"></script>
+<script src="../details.js"></script>
+<script src="../render.js"></script>
+<script>
+  var screen = window.SCREENS.find(function (s) { return s.key === 'waitTimeSettings'; });
+  var root = document.getElementById('board-root');
+  root.innerHTML = window.DescBoard.screenBlockHtml(screen, '../');
+  window.DescBoard.restoreMemos(root);
+</script>
+</body>
+</html>

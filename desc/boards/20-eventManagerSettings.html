@@ -1,0 +1,26 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>행사 담당자 — 설정 — 기획 주석 보드</title>
+<link rel="stylesheet" href="../board.css" />
+</head>
+<body>
+<div class="crumbs" style="display:flex;gap:16px;align-items:center;">
+  <a href="index.html">전체 화면 목록</a>
+  <a href="19-eventManagerSales-detail.html">&larr; 행사 담당자 — 매출 상세 (매장별 랭킹)</a>
+  <a href="21-eventManagerStoreOrders.html" style="margin-left:auto;">행사 담당자 — 매장별 주문조회 &rarr;</a>
+</div>
+<div id="board-root"></div>
+<script src="../screens.js"></script>
+<script src="../details.js"></script>
+<script src="../render.js"></script>
+<script>
+  var screen = window.SCREENS.find(function (s) { return s.key === 'eventManagerSettings'; });
+  var root = document.getElementById('board-root');
+  root.innerHTML = window.DescBoard.screenBlockHtml(screen, '../');
+  window.DescBoard.restoreMemos(root);
+</script>
+</body>
+</html>

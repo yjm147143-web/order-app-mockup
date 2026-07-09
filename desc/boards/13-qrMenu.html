@@ -1,0 +1,26 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>QR 메뉴판 보기 — 기획 주석 보드</title>
+<link rel="stylesheet" href="../board.css" />
+</head>
+<body>
+<div class="crumbs" style="display:flex;gap:16px;align-items:center;">
+  <a href="index.html">전체 화면 목록</a>
+  <a href="12-staffAccounts.html">&larr; 직원 계정 관리</a>
+  <a href="14-devOptionsPanel.html" style="margin-left:auto;">개발자 옵션 (전역) &rarr;</a>
+</div>
+<div id="board-root"></div>
+<script src="../screens.js"></script>
+<script src="../details.js"></script>
+<script src="../render.js"></script>
+<script>
+  var screen = window.SCREENS.find(function (s) { return s.key === 'qrMenu'; });
+  var root = document.getElementById('board-root');
+  root.innerHTML = window.DescBoard.screenBlockHtml(screen, '../');
+  window.DescBoard.restoreMemos(root);
+</script>
+</body>
+</html>

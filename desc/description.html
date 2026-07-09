@@ -1,0 +1,41 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>사장님 관리자 앱 — 기획 주석 보드</title>
+<link rel="stylesheet" href="board.css" />
+</head>
+<body>
+
+<div class="board-header">
+  <h1>사장님 관리자 앱 (ORDER APP) — 기획 주석 보드</h1>
+  <div class="sub">
+    사이드바(앱 진입 흐름) 순서대로 전 화면을 배치했습니다. 화면 왼쪽은 실제 캡처 화면 + 번호 핀, 오른쪽은 번호별 3분류 카드입니다.<br />
+    Figma로 가져가려면(html.to.design) 화면별로 분리된 <a href="boards/index.html">boards/index.html</a> 쪽을 화면 하나씩 임포트하는 것을 권장합니다 — 레이어가 기능별로 깔끔하게 나뉩니다.
+  </div>
+  <div class="legend">
+    <span class="l1"><span class="dot"></span>기능·목적 — 이 요소가 왜 있는지</span>
+    <span class="l2"><span class="dot"></span>동작·상태값 — 눌렀을 때/상태에 따라 무슨 일이 일어나는지</span>
+    <span class="l3"><span class="dot"></span>예외처리·UX문구 — 실패·빈 값·권한 등 예외 상황</span>
+  </div>
+</div>
+
+<div class="review-banner">
+  카드 아래 <b>"내 메모"</b> 칸에 적은 내용은 이 브라우저(기기)에만 저장됩니다 — 다른 기기·브라우저에서는 보이지 않으니, 확정된 내용은 별도 문서로 옮겨두는 것을 권장합니다.
+  화면 간 모순·확인이 필요한 항목은 <a href="REVIEW_NOTES.md">REVIEW_NOTES.md</a>에 정리했습니다.
+</div>
+
+<div id="board-root" class="index-groups" style="padding-top:8px;"></div>
+
+<script src="screens.js"></script>
+<script src="details.js"></script>
+<script src="render.js"></script>
+<script>
+  var root = document.getElementById('board-root');
+  var sorted = window.SCREENS.slice().sort(function (a, b) { return a.ord - b.ord; });
+  root.innerHTML = sorted.map(function (s) { return window.DescBoard.screenBlockHtml(s, ''); }).join('');
+  window.DescBoard.restoreMemos(root);
+</script>
+</body>
+</html>
