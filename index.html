@@ -46,9 +46,7 @@
 <script src="src/screens/eventManagerStores.js"></script>
 <script src="src/screens/eventManagerSales.js"></script>
 <script src="src/screens/eventManagerSettings.js"></script>
-<script src="src/screens/eventManagerStoreOrders.js"></script>
 <script src="src/screens/eventManagerShell.js"></script>
-<script src="src/screens/storeSelect.js"></script>
 <script src="src/screens/customers.js"></script>
 <script src="src/screens/menu.js"></script>
 <script src="src/screens/settings.js"></script>
@@ -129,12 +127,6 @@
       AppState.logout();
       Router.showScreen('login');
       setTimeout(done, 150);
-    },
-    storeSelect: function (done) {
-      ownerSetup(function (user, stores) {
-        Router.showScreen('storeSelect', { stores: stores });
-        setTimeout(done, 150);
-      });
     },
     'customers-waiting': function (done) {
       ownerSetup(function () {
@@ -259,7 +251,7 @@
         setTimeout(function () {
           click('[data-action="em-tab"][data-key="SALES"]');
           setTimeout(function () {
-            click('[data-action="open-dimension"][data-key="STORE_RANKING"]');
+            click('[data-action="open-dimension"][data-key="PERIOD"]');
             setTimeout(done, 400);
           }, 400);
         }, 600);
@@ -272,14 +264,6 @@
           click('[data-action="em-tab"][data-key="SETTINGS"]');
           setTimeout(done, 400);
         }, 600);
-      });
-    },
-    eventManagerStoreOrders: function (done) {
-      managerSetup('manager1', function (user, events) {
-        MockApi.getStoresByEvent(events[0].id).then(function (r) {
-          Router.showScreen('eventManagerStoreOrders', { storeId: r.stores[0].id });
-          setTimeout(done, 400);
-        });
       });
     },
   };

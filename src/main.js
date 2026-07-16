@@ -35,13 +35,10 @@
       return;
     }
     if (!AppState.hasSelectedStore()) {
+      // 기능명세서 기준 사장님/직원 계정은 매장 1곳에 소속되므로 별도 매장 선택 화면 없이 바로 진입한다.
       MockApi.getMyStores(user.id).then(function (res) {
-        if (res.stores.length === 1) {
-          AppState.selectStore(res.stores[0].id);
-          Router.showScreen('customers');
-        } else {
-          Router.showScreen('storeSelect', { stores: res.stores });
-        }
+        AppState.selectStore(res.stores[0].id);
+        Router.showScreen('customers');
       });
       return;
     }

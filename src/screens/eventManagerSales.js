@@ -10,12 +10,8 @@
  *
  * 상단 요약 카드의 "주문경로 비중"/"총 주문·취소 건수"는 오늘 하루 기준으로 계산한다
  * (MockApi.getEventOrderStats) — 매출과 달리 완료 여부와 무관하게 건수를 센다.
- * 'AI 분석' 버튼은 목업이다 — 실제 AI/LLM 연동은 MockApi.getAiSalesInsight() 함수 하나만
- * 교체하면 되도록 만들어뒀다(README 참고).
  *
- * '매장별 매출 랭킹'과 '메뉴별 매출 랭킹' 카드를 누르면 상세 화면으로 들어가고, 매장별 랭킹의
- * 각 행을 누르면 Router.showScreen('eventManagerStoreOrders', {storeId})로 이동한다(읽기 전용
- * 주문조회 화면 — eventManagerStores.js의 매장 카드 클릭과 동일한 진입점을 쓴다).
+ * '메뉴별 매출' 카드를 누르면 랭킹 상세 화면으로 들어간다(기준: 매출액 높은 순).
  */
 (function () {
   var PERIODS = [
@@ -25,7 +21,7 @@
   ];
 
   var DIMENSIONS = [
-    { key: 'STORE_RANKING', label: '매장별 매출', emoji: '🏪' },
+    { key: 'PERIOD', label: '기간별 매출', emoji: '📊' },
     { key: 'PAYMENT', label: '결제수단별 매출', emoji: '💳' },
     { key: 'HOUR', label: '시간대별 매출', emoji: '🕒' },
     { key: 'CHANNEL', label: '주문경로별 매출', emoji: '🧾' },
@@ -38,7 +34,6 @@
   var customFrom = '';
   var customTo = '';
   var storeFilter = 'ALL';
-  var aiInsightVisible = false;
 
   var eventCache = null;
   var storesCache = [];
@@ -69,63 +64,37 @@
   /* ---------------- 상단 요약 ---------------- */
 
   function overviewCardHtml(summary, orderStats) {
-    var avgPerStore = summary.totalStores > 0 ? Math.round(summary.totalSales / summary.totalStores) : 0;
+    var avgPerStoreToday = summary.totalStores > 0 ? Math.round(summary.todaySales / summary.totalStores) : 0;
+    var avgPerStoreTotal = summary.totalStores > 0 ? Math.round(summary.totalSales / summary.totalStores) : 0;
     return (
       '<div class="card" style="margin-bottom:14px;">' +
         '<div style="display:flex;justify-content:space-between;margin-bottom:14px;">' +
-          '<div><div style="font-size:12px;color:var(--color-text-secondary);margin-bottom:2px;">행사 전체 누적 매출</div>' +
-            '<div style="font-size:19px;font-weight:800;">' + UI.formatWon(summary.totalSales) + '</div></div>' +
-          '<div style="text-align:right;"><div style="font-size:12px;color:var(--color-text-secondary);margin-bottom:2px;">오늘 매출</div>' +
+          '<div><div style="font-size:12px;color:var(--color-text-secondary);margin-bottom:2px;">오늘 매출</div>' +
             '<div style="font-size:19px;font-weight:800;">' + UI.formatWon(summary.todaySales) + '</div></div>' +
+          '<div style="text-align:right;"><div style="font-size:12px;color:var(--color-text-secondary);margin-bottom:2px;">행사 누적 매출</div>' +
+            '<div style="font-size:19px;font-weight:800;">' + UI.formatWon(summary.totalSales) + '</div></div>' +
+        '</div>' +
+        '<div style="display:flex;justify-content:space-between;margin-bottom:14px;">' +
+          '<div><div style="font-size:12px;color:var(--color-text-secondary);margin-bottom:2px;">오늘 주문건수</div>' +
+            '<div style="font-size:17px;font-weight:800;">' + orderStats.totalOrderCount + '건</div></div>' +
+          '<div style="text-align:right;"><div style="font-size:12px;color:var(--color-text-secondary);margin-bottom:2px;">행사 누적 주문건수</div>' +
+            '<div style="font-size:17px;font-weight:800;">' + summary.totalOrderCount + '건</div></div>' +
         '</div>' +
         '<div style="display:flex;justify-content:space-between;margin-bottom:14px;">' +
           '<div><div style="font-size:12px;color:var(--color-text-secondary);margin-bottom:2px;">참여 매장 수</div>' +
             '<div style="font-size:17px;font-weight:800;">' + summary.totalStores + '개</div></div>' +
-          '<div style="text-align:right;"><div style="font-size:12px;color:var(--color-text-secondary);margin-bottom:2px;">매장당 평균 매출(누적)</div>' +
-            '<div style="font-size:17px;font-weight:800;">' + UI.formatWon(avgPerStore) + '</div></div>' +
+          '<div style="text-align:right;"><div style="font-size:12px;color:var(--color-text-secondary);margin-bottom:2px;">매장당 평균 매출(오늘/누적)</div>' +
+            '<div style="font-size:15px;font-weight:800;">' + UI.formatWon(avgPerStoreToday) + ' / ' + UI.formatWon(avgPerStoreTotal) + '</div></div>' +
         '</div>' +
         '<hr class="divider" style="margin:2px 0 14px;" />' +
         '<div style="display:flex;justify-content:space-between;">' +
           '<div><div style="font-size:12px;color:var(--color-text-secondary);margin-bottom:2px;">주문경로 비중 (오늘)</div>' +
             '<div style="font-size:15px;font-weight:800;">QR ' + orderStats.qrPct + '% · 태블릿 ' + orderStats.tabletPct + '%</div></div>' +
-          '<div style="text-align:right;"><div style="font-size:12px;color:var(--color-text-secondary);margin-bottom:2px;">총 주문 / 취소 (오늘)</div>' +
-            '<div style="font-size:15px;font-weight:800;">총 ' + orderStats.totalOrderCount + '건 / 취소 ' + orderStats.canceledOrderCount + '건</div></div>' +
+          '<div style="text-align:right;"><div style="font-size:12px;color:var(--color-text-secondary);margin-bottom:2px;">취소 (오늘)</div>' +
+            '<div style="font-size:15px;font-weight:800;">취소 ' + orderStats.canceledOrderCount + '건</div></div>' +
         '</div>' +
-        '<div style="margin-top:14px;">' + UI.button({ label: '✨ AI 분석', action: 'toggle-ai-insight', variant: 'outline' }) + '</div>' +
-        '<div id="em-ai-insight-host"></div>' +
       '</div>'
     );
-  }
-
-  /* ---------------- 매장별 매출 랭킹 (막대 상대 비교) ---------------- */
-
-  function rankingHtml(stores) {
-    var useToday = periodPreset === 'TODAY';
-    var ranked = stores
-      .slice()
-      .map(function (s) {
-        return { id: s.id, name: s.name, boothNumber: s.boothNumber, amount: useToday ? (s.todaySalesAmount || 0) : (s.totalSalesAmount || 0) };
-      })
-      .sort(function (a, b) { return b.amount - a.amount; });
-    var maxAmount = ranked.reduce(function (mx, r) { return Math.max(mx, r.amount); }, 0);
-    if (ranked.length === 0) {
-      return '<div class="helper-text" style="text-align:left;">매장이 없어요.</div>';
-    }
-    return ranked
-      .map(function (r, idx) {
-        var pct = maxAmount > 0 ? Math.round((r.amount / maxAmount) * 100) : 0;
-        var isTop = idx === 0 && r.amount > 0;
-        return (
-          '<div class="store-rank-row" data-action="open-store-detail" data-store-id="' + r.id + '">' +
-            '<div class="store-rank-header">' +
-              '<span class="store-rank-name">' + (idx + 1) + '. ' + UI.escapeHtml(r.name) + (r.boothNumber ? ' · ' + UI.escapeHtml(r.boothNumber) : '') + '</span>' +
-              '<span class="store-rank-amount">' + UI.formatWon(r.amount) + '</span>' +
-            '</div>' +
-            '<div class="store-rank-bar-track"><div class="store-rank-bar-fill" style="width:' + pct + '%;background:' + (isTop ? 'var(--color-text-primary)' : 'var(--color-disabled)') + ';"></div></div>' +
-          '</div>'
-        );
-      })
-      .join('');
   }
 
   /* ---------------- 렌더링 ---------------- */
@@ -168,10 +137,7 @@
 
   function renderDetail() {
     var meta = dimensionMeta(currentDimension);
-    var isStoreRanking = currentDimension === 'STORE_RANKING';
     var isMenuRanking = currentDimension === 'MENU_RANKING';
-    var needsChart = !isStoreRanking && !isMenuRanking;
-    var needsTotalCard = !isStoreRanking;
     var storeOptions = '<option value="ALL">전체 합산</option>' +
       storesCache.map(function (s) { return '<option value="' + s.id + '" ' + (s.id === storeFilter ? 'selected' : '') + '>' + UI.escapeHtml(s.name) + '</option>'; }).join('');
     return (
@@ -181,20 +147,12 @@
           '<span class="detail-header-title">' + meta.emoji + ' ' + meta.label + '</span>' +
         '</div>' +
         periodBarHtml('em-sales-period-bar') +
-        (isStoreRanking
-          ? ''
-          : '<div style="display:flex;justify-content:flex-end;margin:10px 0;">' +
-              '<select id="em-sales-store-filter" class="input-field" style="width:auto;">' + storeOptions + '</select>' +
-            '</div>') +
-        (needsTotalCard ? '<div class="card sales-total-card" id="em-sales-total-card"><span class="summary-label">총 매출</span><span class="summary-value" id="em-sales-total">-</span><div class="helper-text" style="text-align:left;margin-top:4px;" id="em-sales-order-count"></div></div>' : '') +
-        (needsChart ? '<div id="em-sales-chart-host"></div>' : '') +
-        (isStoreRanking
-          ? '<div class="card" style="margin-top:14px;">' +
-              '<div style="font-weight:800;font-size:14px;margin-bottom:10px;">매장별 매출 랭킹</div>' +
-              '<div id="em-sales-ranking-host">불러오는 중...</div>' +
-            '</div>'
-          : '') +
-        (isMenuRanking ? '<div id="em-sales-menu-ranking-host" style="margin-top:14px;"></div>' : '') +
+        '<div style="display:flex;justify-content:flex-end;margin:10px 0;">' +
+          '<select id="em-sales-store-filter" class="input-field" style="width:auto;">' + storeOptions + '</select>' +
+        '</div>' +
+        '<div class="card sales-total-card" id="em-sales-total-card"><span class="summary-label">총 매출</span><span class="summary-value" id="em-sales-total">-</span><div class="helper-text" style="text-align:left;margin-top:4px;" id="em-sales-order-count"></div></div>' +
+        (isMenuRanking ? '' : '<div id="em-sales-chart-host"></div>') +
+        '<div id="em-sales-breakdown-list" style="margin-top:14px;"></div>' +
       '</div>'
     );
   }
@@ -215,70 +173,26 @@
       var host = rootEl.querySelector('#em-sales-overview-host');
       if (host) {
         host.innerHTML = overviewCardHtml(results[0], results[1]);
-        wireAiInsightButton();
       }
     });
-  }
-
-  function wireAiInsightButton() {
-    var btn = rootEl.querySelector('[data-action="toggle-ai-insight"]');
-    if (!btn) return;
-    btn.addEventListener('click', function () {
-      var host = rootEl.querySelector('#em-ai-insight-host');
-      if (aiInsightVisible) {
-        aiInsightVisible = false;
-        host.innerHTML = '';
-        return;
-      }
-      host.innerHTML = '<div class="helper-text" style="text-align:left;margin-top:10px;">분석 중...</div>';
-      var eventId = AppState.get().currentEventId;
-      MockApi.getAiSalesInsight(eventId).then(function (res) {
-        aiInsightVisible = true;
-        host.innerHTML = '<div class="ai-insight-box">🤖 ' + UI.escapeHtml(res.message) + '</div>';
-      });
-    });
-  }
-
-  function loadRanking() {
-    var host = rootEl.querySelector('#em-sales-ranking-host');
-    if (host) {
-      host.innerHTML = rankingHtml(storesCache);
-      wireRankingClicks();
-    }
-    var filterHost = rootEl.querySelector('#em-sales-store-filter');
-    if (filterHost) {
-      filterHost.innerHTML = '<option value="ALL">전체 합산</option>' +
-        storesCache.map(function (s) { return '<option value="' + s.id + '" ' + (s.id === storeFilter ? 'selected' : '') + '>' + UI.escapeHtml(s.name) + '</option>'; }).join('');
-    }
   }
 
   function loadDetailData(eventId) {
     var range = currentRange();
-    if (currentDimension === 'STORE_RANKING') {
-      loadRanking();
-      return;
-    }
     if (currentDimension === 'MENU_RANKING') {
       MockApi.getEventMenuRanking(eventId, storeFilter, range).then(function (data) {
         rootEl.querySelector('#em-sales-total').textContent = UI.formatWon(data.totalAmount);
         rootEl.querySelector('#em-sales-order-count').textContent = '주문 ' + data.orderCount + '건 기준';
-        rootEl.querySelector('#em-sales-menu-ranking-host').innerHTML = UI.breakdownListHtml(data, '해당 기간의 메뉴 판매 데이터가 없어요');
+        rootEl.querySelector('#em-sales-breakdown-list').innerHTML = UI.breakdownListHtml(data, '해당 기간의 메뉴 판매 데이터가 없어요');
       });
       return;
     }
-    // PAYMENT | HOUR | CHANNEL
+    // PERIOD | PAYMENT | HOUR | CHANNEL
     MockApi.getEventSalesBreakdown(eventId, storeFilter, currentDimension, range).then(function (data) {
       rootEl.querySelector('#em-sales-total').textContent = UI.formatWon(data.totalAmount);
       rootEl.querySelector('#em-sales-order-count').textContent = '주문 ' + data.orderCount + '건 기준';
       rootEl.querySelector('#em-sales-chart-host').innerHTML = UI.salesChartHtml(currentDimension, data);
-    });
-  }
-
-  function wireRankingClicks() {
-    rootEl.querySelectorAll('[data-action="open-store-detail"]').forEach(function (el) {
-      el.addEventListener('click', function () {
-        Router.showScreen('eventManagerStoreOrders', { storeId: el.getAttribute('data-store-id') });
-      });
+      rootEl.querySelector('#em-sales-breakdown-list').innerHTML = UI.breakdownListHtml(data, '해당 기간의 매출이 없어요', { highlightMinMax: currentDimension === 'PERIOD' });
     });
   }
 
@@ -330,14 +244,7 @@
       });
     }
 
-    if (currentDimension === 'STORE_RANKING' && storesCache.length === 0) {
-      MockApi.getStoresByEvent(eventId).then(function (res) {
-        storesCache = res.stores;
-        loadDetailData(eventId);
-      });
-    } else {
-      loadDetailData(eventId);
-    }
+    loadDetailData(eventId);
   }
 
   function mount(root) {
@@ -348,7 +255,6 @@
     // 한 번 더 그려서(root.innerHTML = render()) 항상 허브에서 시작하도록 보장한다.
     currentView = 'HUB';
     currentDimension = null;
-    aiInsightVisible = false;
     storeFilter = 'ALL';
     rootEl.innerHTML = render();
 

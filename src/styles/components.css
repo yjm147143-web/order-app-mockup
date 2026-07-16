@@ -534,6 +534,12 @@
   border: 1.5px solid var(--color-accent-red);
 }
 
+/* 고객 호출을 이미 한 번이라도 보낸 주문 카드 — 아직 호출 안 한 카드와 구분되도록 음영 처리 */
+.order-card.called {
+  background: #eaf2ff;
+  border: 1px solid #cfe3ff;
+}
+
 /* ---------- Order Card: 헤더 행(체크박스/채널배지/PG주문번호) ---------- */
 .order-card-header-row {
   display: flex;

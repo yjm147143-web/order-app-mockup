@@ -12,13 +12,10 @@
  *  getMyEvents()                -> GET    /users/:userId/events
  *  getStaffUsers()              -> GET    /stores/:storeId/staff
  *  addStaffUser()               -> POST   /stores/:storeId/staff
- *  updateStaffPermissions()     -> PATCH  /users/:userId/permissions
  *  setStaffActive()             -> PATCH  /users/:userId/active
  *  getEvent()                   -> GET    /events/:eventId
  *  updateStoreOperatingStatus() -> PATCH  /stores/:storeId/operating-status
  *  bulkUpdateStoreStatus()      -> POST   /events/:eventId/stores/bulk-status
- *  getAuditLogs()               -> GET    /events/:eventId/audit-logs
- *  setAutoSoldoutOnZeroStock()  -> PATCH  /stores/:storeId/auto-soldout-on-zero-stock
  *  setAutoAcceptOrders()        -> PATCH  /stores/:storeId/auto-accept-orders
  *  updateWaitTimeConfig()       -> PATCH  /stores/:storeId/wait-time-config
  *  getEstimatedWaitInfo()       -> GET    /stores/:storeId/estimated-wait-info
@@ -45,7 +42,6 @@
  *  getEventSalesBreakdown()       -> GET   /events/:eventId/sales?storeId=&dimension=&from=&to=
  *  getEventMenuRanking()          -> GET   /events/:eventId/menu-ranking?storeId=&from=&to=
  *  getEventOrderStats()           -> GET   /events/:eventId/order-stats
- *  getAiSalesInsight()            -> GET   /events/:eventId/ai-sales-insight (실제 AI 연동 시 이 함수만 교체)
  *
  * 실제 프로젝트(Node 사용 가능 환경)에서는 json-server + 이 함수들 내부를
  * fetch('http://localhost:4000/...') 로 바꾸는 것을 권장한다. (README 참고)
@@ -63,13 +59,18 @@
  */
 
 (function () {
-  var DB_KEY = 'sajang-app-mock-db-v14'; // v11: 주문 화면 상단 재배치 — Order.paymentMethod 실제 필드 추가,
+  var DB_KEY = 'sajang-app-mock-db-v15'; // v11: 주문 화면 상단 재배치 — Order.paymentMethod 실제 필드 추가,
                                           // 매출 집계(PAYMENT)도 해시 흉내 대신 이 필드를 직접 집계하도록 변경
                                           // v12: Order.orderType(포장|다회용기|체험) 추가, Store.autoAcceptOrders 추가
                                           // v13: Store.estimatedWaitMinutes -> waitTimeGuideEnabled/waitTimeMenuCountUnit/
                                           // waitTimeMinutesPerUnit 계산식으로 교체, MenuItem.origin 추가, STAFF 계정
                                           // isActive/permissions 추가
                                           // v14: Store.waitTimeMaxMinutes 추가(예상 대기시간 상한 고정값)
+                                          // v15: 기능명세서 정합화 — 자동품절 여부를 Store 전체 설정에서
+                                          // MenuItem별 필드(autoSoldout)로 이동, STAFF 권한 토글 제거(고정
+                                          // '직원' 역할) 대신 email/usagePeriod 추가, Store.totalOrderCount
+                                          // 추가(행사 누적 주문건수), autoAcceptOrders 기본값 true로 변경,
+                                          // AuditLog/AI 분석/매장별 매출 랭킹/매장별 주문조회 드릴다운 제거
   var LATENCY_MS = 300;
 
   function deepClone(obj) {
@@ -98,7 +99,6 @@
       orders: deepClone(window.MockData.ORDERS),
       orderItems: deepClone(window.MockData.ORDER_ITEMS),
       notificationLogs: deepClone(window.MockData.NOTIFICATION_LOGS),
-      auditLogs: deepClone(window.MockData.AUDIT_LOGS || []),
       nextOrderNo: window.MockData.NEXT_ORDER_NO,
     };
     saveDB(db);
@@ -139,18 +139,27 @@
     );
   }
 
-  /** 한글 단어 끝 받침 유무에 따라 '이'/'가' 조사를 고른다(AI 분석 문장 조합용) */
-  function pickIGaParticle(word) {
-    if (!word) return '가';
-    var code = word.charCodeAt(word.length - 1);
-    if (code >= 0xac00 && code <= 0xd7a3) {
-      return (code - 0xac00) % 28 !== 0 ? '이' : '가';
-    }
-    return '가';
-  }
-
   function findStore(storeId) {
     return db.stores.find(function (s) { return s.id === storeId; });
+  }
+
+  /**
+   * 행사 상태(예정/진행중/마감)는 시드값을 그대로 믿지 않고 오늘 날짜 vs startDate/endDate로
+   * 매번 다시 계산한다 — 기능명세서 '행사 선택 > 행사 list' 항목의 상태값 표기(진행중/예정/마감) 기준.
+   * 매장 영업상태(operatingStatus)의 '마감'과 이름은 같지만 서로 다른 축이다.
+   */
+  function computeEventStatus(event) {
+    var todayMid = new Date();
+    todayMid = new Date(todayMid.getFullYear(), todayMid.getMonth(), todayMid.getDate());
+    var start = new Date(event.startDate + 'T00:00:00');
+    var end = new Date(event.endDate + 'T00:00:00');
+    if (todayMid < start) return '예정';
+    if (todayMid > end) return '마감';
+    return '진행중';
+  }
+
+  function withComputedEventStatus(event) {
+    return Object.assign({}, event, { status: computeEventStatus(event) });
   }
 
   /**
@@ -239,7 +248,7 @@
   }
 
   /**
-   * 재고 수량이 0으로 설정되고 매장의 autoSoldoutOnZeroStock이 켜져 있으면 자동으로 품절 처리한다.
+   * 재고 수량이 0으로 설정되고 이 메뉴의 autoSoldout(기본값 true)이 켜져 있으면 자동으로 품절 처리한다.
    * stockQuantity가 null(무제한)이거나 0보다 크면 건드리지 않는다(자동으로 품절 해제하지는 않음 —
    * 품절 해제는 사장님이 직접 토글해야 한다).
    * 반환값: 이번 호출로 '방금' isSoldout이 false -> true로 바뀌었으면 true(자동 품절 알림 배너용),
@@ -248,23 +257,76 @@
   function applyAutoSoldout(menuItem) {
     if (menuItem.stockQuantity !== 0) return false;
     if (menuItem.isSoldout) return false;
-    var category = db.menuCategories.find(function (c) { return c.id === menuItem.categoryId; });
-    var store = category && findStore(category.storeId);
-    if (store && store.autoSoldoutOnZeroStock) {
+    if (menuItem.autoSoldout !== false) {
       menuItem.isSoldout = true;
       return true;
     }
     return false;
   }
 
+  /**
+   * 주문 액션별 카카오 알림톡(목업) 문구 — 기능명세서의 액션별 알림톡 라벨을 그대로 따른다.
+   * ORDER_ACCEPTED: 대기 탭 '주문 수락' -> '주문 완료' 알림톡
+   * PICKUP_CALL: 처리중 탭 '고객 호출' -> '픽업 안내' 알림톡 (sendKakaoAlert 전용, 90%/10% 성공·실패 흉내)
+   * PAYMENT_CANCELED: 처리중 탭 '결제 취소' 알림톡
+   * RETURNED: 완료 탭 '반품' 알림톡
+   */
+  var NOTIFICATION_TEMPLATES = {
+    ORDER_ACCEPTED: function (order, store, customerLabel) {
+      return '[' + (store ? store.name : '') + '] ' + customerLabel + '님, 주문이 완료되었습니다! 준비되는 대로 다시 알려드릴게요. 주문번호: ' + order.pgOrderNo;
+    },
+    PICKUP_CALL: function (order, store, customerLabel, location) {
+      return '[' + (store ? store.name : '') + '] ' + customerLabel + '님, 주문하신 메뉴가 준비되었습니다. ' + location + '에서 수령해 주세요. 주문번호: ' + order.pgOrderNo;
+    },
+    PAYMENT_CANCELED: function (order, store, customerLabel) {
+      return '[' + (store ? store.name : '') + '] ' + customerLabel + '님, 주문하신 내역이 결제 취소되었습니다. 주문번호: ' + order.pgOrderNo;
+    },
+    RETURNED: function (order, store, customerLabel) {
+      return '[' + (store ? store.name : '') + '] ' + customerLabel + '님, 주문하신 내역이 반품 처리되었습니다. 주문번호: ' + order.pgOrderNo;
+    },
+  };
+
+  function buildNotificationMessage(order, kind) {
+    var store = findStore(order.storeId);
+    var customerLabel = order.customerName || '#' + order.orderNo;
+    var location = order.receiveType === 'TABLE_SERVICE' ? '테이블 ' + order.tableOrPickupNo + '번' : '카운터';
+    var builder = NOTIFICATION_TEMPLATES[kind];
+    return builder ? builder(order, store, customerLabel, location) : '';
+  }
+
+  /** 항상 성공으로 기록되는 알림톡 로그 — 주문 수락/결제 취소/반품처럼 실패 시뮬레이션이 필요 없는 액션용 */
+  function pushNotificationLog(order, kind) {
+    var log = {
+      id: 'log-' + Date.now() + '-' + Math.floor(Math.random() * 1000),
+      orderId: order.id,
+      type: 'KAKAO_ALERT',
+      kind: kind,
+      status: 'SUCCESS',
+      sentAt: new Date().toISOString(),
+      message: buildNotificationMessage(order, kind),
+    };
+    db.notificationLogs.push(log);
+    return log;
+  }
+
   var MockApi = {
     /** POST /auth/login */
     login: function (loginId, password) {
+      if (!loginId || !loginId.trim()) {
+        return withLatency({ message: '아이디를 입력해주세요.' }, true);
+      }
+      if (!password) {
+        return withLatency({ message: '비밀번호를 입력해주세요.' }, true);
+      }
+      var accountExists = db.users.some(function (u) { return u.loginId === loginId; });
+      if (!accountExists) {
+        return withLatency({ message: '아이디 또는 비밀번호가 올바르지 않아요.' }, true);
+      }
       var user = db.users.find(function (u) {
         return u.loginId === loginId && u.password === password;
       });
       if (!user) {
-        return withLatency({ message: '아이디 또는 비밀번호가 올바르지 않습니다.' }, true);
+        return withLatency({ message: '아이디 또는 비밀번호가 올바르지 않아요.' }, true);
       }
       if (user.role === 'STAFF' && user.isActive === false) {
         return withLatency({ message: '비활성화된 계정입니다. 사장님께 문의해주세요.' }, true);
@@ -296,7 +358,8 @@
       }
       var events = (user.eventIds || [])
         .map(function (eventId) { return db.events.find(function (e) { return e.id === eventId; }); })
-        .filter(Boolean);
+        .filter(Boolean)
+        .map(withComputedEventStatus);
       return withLatency({ events: events });
     },
 
@@ -325,24 +388,13 @@
         password: payload.password || '0000',
         name: payload.name.trim(),
         phone: payload.phone || '',
+        email: payload.email || '',
+        usagePeriod: payload.usagePeriod || { type: 'ALWAYS' },
         role: 'STAFF',
         storeIds: [storeId],
         isActive: true,
-        permissions: { orderManage: true, menuManage: false, salesView: false, settingsChange: false },
       };
       db.users.push(user);
-      saveDB(db);
-      emit('mock:staff-changed', {});
-      return withLatency({ user: user });
-    },
-
-    /** PATCH /users/:userId/permissions */
-    updateStaffPermissions: function (userId, permissions) {
-      var user = db.users.find(function (u) { return u.id === userId && u.role === 'STAFF'; });
-      if (!user) {
-        return withLatency({ message: '직원 계정을 찾을 수 없습니다.' }, true);
-      }
-      user.permissions = Object.assign({}, user.permissions, permissions);
       saveDB(db);
       emit('mock:staff-changed', {});
       return withLatency({ user: user });
@@ -366,7 +418,7 @@
       if (!event) {
         return withLatency({ message: '행사를 찾을 수 없습니다.' }, true);
       }
-      return withLatency({ event: event });
+      return withLatency({ event: withComputedEventStatus(event) });
     },
 
     /** GET /events/:eventId/stores — 그 행사에 속한 매장(부스) 전체 */
@@ -382,11 +434,13 @@
       var todaySales = 0;
       var totalSales = 0;
       var todayOrderCount = 0;
+      var totalOrderCount = 0;
       stores.forEach(function (s) {
         storeCounts[s.operatingStatus] = (storeCounts[s.operatingStatus] || 0) + 1;
         todaySales += s.todaySalesAmount || 0;
         totalSales += s.totalSalesAmount || 0;
         todayOrderCount += s.todayOrderCount || 0;
+        totalOrderCount += s.totalOrderCount || 0;
       });
       return withLatency({
         totalStores: stores.length,
@@ -394,6 +448,7 @@
         todaySales: todaySales,
         totalSales: totalSales,
         todayOrderCount: todayOrderCount,
+        totalOrderCount: totalOrderCount,
       });
     },
 
@@ -435,7 +490,7 @@
           }
         }
 
-        if (event.status === '진행중' && store.operatingStatus === 'CLOSED') {
+        if (computeEventStatus(event) === '진행중' && store.operatingStatus === 'CLOSED') {
           var closedTime = store.statusChangedAt ? new Date(store.statusChangedAt).getTime() : null;
           if (closedTime && now - closedTime >= CLOSED_STALE_MS) {
             items.push({ storeId: store.id, storeName: store.name, boothNumber: store.boothNumber, reason: '행사 진행 중인데 마감 상태를 계속 유지하고 있어요' });
@@ -453,11 +508,8 @@
      * 나머지는 실제로 상태를 바꾸되, 약 10% 확률로 무작위 실패를 재현한다 — 실제 서비스라면
      * 매장 단말기가 오프라인이거나 네트워크 문제로 개별 매장 처리가 실패할 수 있는 상황을
      * 흉내낸 것이다. 하나가 실패해도 나머지 매장 처리는 계속 진행한다(부분 실패 허용).
-     * 처리 후 AuditLog를 한 건 남긴다(요청 1번 = 로그 1건, targetStoreIds에 전체 대상이 담김).
-     * actorUser: 조작을 실행한 행사 담당자 계정(AppState.get().currentUser).
-     * scopeLabel: 화면에 보여줄 대상 설명(예: '전체 12개', '선택한 3개') — 로그 문장에 그대로 쓰인다.
      */
-    bulkUpdateStoreStatus: function (storeIds, targetStatus, actorUser, scopeLabel) {
+    bulkUpdateStoreStatus: function (storeIds, targetStatus) {
       var now = new Date().toISOString();
       var succeeded = [];
       var skipped = [];
@@ -482,41 +534,11 @@
         succeeded.push({ storeId: storeId, storeName: store.name });
       });
 
-      var STATUS_LABEL = { OPEN: '개점', CLOSED: '마감', PAUSED: '일시중지' };
-      var statusLabel = STATUS_LABEL[targetStatus] || targetStatus;
-      var resultSummary = '성공 ' + succeeded.length + '개 · 이미 같은 상태라 제외 ' + skipped.length + '개 · 실패 ' + failed.length + '개';
-      var log = {
-        id: 'audit-' + Date.now() + '-' + Math.floor(Math.random() * 1000),
-        actorUserId: actorUser.id,
-        actorRole: actorUser.role,
-        action: '행사담당자 ' + actorUser.name + '님이 ' + (scopeLabel || storeIds.length + '개') + ' 매장을 ' + statusLabel + '(으)로 변경',
-        targetStoreIds: storeIds,
-        beforeStatus: null, // 매장마다 이전 상태가 다를 수 있어 일괄 조치에서는 단일 값으로 표현하지 않는다
-        afterStatus: targetStatus,
-        resultSummary: resultSummary,
-        timestamp: now,
-      };
-      db.auditLogs.push(log);
       saveDB(db);
-      // eslint-disable-next-line no-console
-      console.log('[AuditLog]', log.action, '·', log.resultSummary);
       emit('mock:orders-changed', { reason: 'bulk-store-status' }); // 사장님 앱 쪽에서 해당 매장을 보고 있다면 갱신되도록
       emit('mock:dashboard-changed', {});
-      emit('mock:audit-log-added', { log: log });
 
-      return withLatency({ succeeded: succeeded, skipped: skipped, failed: failed, log: log });
-    },
-
-    /** GET /events/:eventId/audit-logs — 이 행사에 속한 매장을 대상으로 한 조작 이력만 최신순으로 필터링 */
-    getAuditLogs: function (eventId) {
-      var storeIdSet = {};
-      db.stores.forEach(function (s) { if (s.eventId === eventId) storeIdSet[s.id] = true; });
-      var logs = db.auditLogs
-        .filter(function (log) {
-          return log.targetStoreIds.some(function (id) { return storeIdSet[id]; });
-        })
-        .sort(function (a, b) { return new Date(b.timestamp) - new Date(a.timestamp); });
-      return withLatency({ auditLogs: logs });
+      return withLatency({ succeeded: succeeded, skipped: skipped, failed: failed });
     },
 
     /**
@@ -569,17 +591,6 @@
       return withLatency({ store: store });
     },
 
-    /** PATCH /stores/:storeId/auto-soldout-on-zero-stock */
-    setAutoSoldoutOnZeroStock: function (storeId, enabled) {
-      var store = findStore(storeId);
-      if (!store) {
-        return withLatency({ message: '매장을 찾을 수 없습니다.' }, true);
-      }
-      store.autoSoldoutOnZeroStock = enabled;
-      saveDB(db);
-      return withLatency({ store: store });
-    },
-
     /** PATCH /stores/:storeId/auto-accept-orders */
     setAutoAcceptOrders: function (storeId, enabled) {
       var store = findStore(storeId);
@@ -619,8 +630,12 @@
         return withLatency({ message: '매장을 찾을 수 없습니다.' }, true);
       }
       var activeOrderIds = {};
+      var activeOrderCount = 0;
       db.orders.forEach(function (o) {
-        if (o.storeId === storeId && (o.status === 'WAITING' || o.status === 'RECEIVED')) activeOrderIds[o.id] = true;
+        if (o.storeId === storeId && (o.status === 'WAITING' || o.status === 'RECEIVED')) {
+          activeOrderIds[o.id] = true;
+          activeOrderCount++;
+        }
       });
       var activeMenuQty = db.orderItems.reduce(function (sum, it) {
         return activeOrderIds[it.orderId] ? sum + it.quantity : sum;
@@ -636,6 +651,7 @@
         minutesPerUnit: minutesPerUnit,
         maxMinutes: maxMinutes,
         activeMenuQty: activeMenuQty,
+        activeOrderCount: activeOrderCount,
         rawEstimatedMinutes: rawEstimatedMinutes,
         estimatedMinutes: estimatedMinutes,
       });
@@ -821,6 +837,7 @@
         isDeleted: false,
         sortOrder: maxSort + 1,
         stockQuantity: payload.stockQuantity === undefined ? null : payload.stockQuantity,
+        autoSoldout: payload.autoSoldout !== false,
         origin: payload.origin || '',
         optionGroups: payload.optionGroups || [],
       };
@@ -843,7 +860,7 @@
       if (!menuItem) {
         return withLatency({ message: '메뉴를 찾을 수 없습니다.' }, true);
       }
-      ['categoryId', 'name', 'description', 'price', 'imageUrl', 'isVisible', 'stockQuantity', 'origin', 'optionGroups'].forEach(function (key) {
+      ['categoryId', 'name', 'description', 'price', 'imageUrl', 'isVisible', 'stockQuantity', 'autoSoldout', 'origin', 'optionGroups'].forEach(function (key) {
         if (payload[key] !== undefined) menuItem[key] = payload[key];
       });
       var autoSoldoutTriggered = applyAutoSoldout(menuItem);
@@ -902,6 +919,7 @@
      * 허용 전이: WAITING -> RECEIVED | COMPLETED,  RECEIVED -> COMPLETED
      * (WAITING에서 RECEIVED(접수)를 건너뛰고 바로 COMPLETED로 가는 것도 허용됨)
      * COMPLETED로 전이될 때마다 completedCount를 1 증가시킨다(되돌리기 후 재완료 시 누적됨).
+     * targetStatus가 RECEIVED(대기탭 '주문 수락')이면 기능명세서 기준 '주문 완료' 알림톡을 함께 발송한다.
      */
     advanceOrderStatus: function (orderId, targetStatus) {
       var order = db.orders.find(function (o) {
@@ -918,25 +936,32 @@
         return withLatency({ message: '허용되지 않는 상태 변경입니다.' }, true);
       }
       var now = new Date().toISOString();
+      var wasWaiting = order.status === 'WAITING';
       if (targetStatus === 'RECEIVED') order.acceptedAt = now;
       if (targetStatus === 'COMPLETED') {
         order.completedAt = now;
         order.completedCount = (order.completedCount || 0) + 1;
       }
       order.status = targetStatus;
+      var log = null;
+      if (targetStatus === 'RECEIVED' && wasWaiting) {
+        log = pushNotificationLog(order, 'ORDER_ACCEPTED');
+      }
       saveDB(db);
       emit('mock:orders-changed', { reason: 'status', orderId: orderId });
-      return withLatency({ order: order });
+      return withLatency({ order: order, notificationLog: log });
     },
 
     /**
      * PATCH /orders/:orderId/cancel
      * STEP 3 기준: 완료(COMPLETED)된 주문도 취소 가능(완료 탭에서도 취소 노출).
      * 단, 이미 취소된 주문은 재취소할 수 없다.
-     * reason은 미리 정의된 사유(품절/고객요청/오류) 또는 '직접입력'으로 사장님이 입력한 임의의
+     * reason은 미리 정의된 사유(품절/고객요청) 또는 '직접입력'으로 사장님이 입력한 임의의
      * 문자열이어도 된다 — 공백이 아닌 문자열이기만 하면 통과시킨다.
+     * notifyKind: 'PAYMENT_CANCELED'(처리중 탭 '결제 취소') | 'RETURNED'(완료 탭 '반품')일 때만
+     * 알림톡을 함께 발송한다 — 대기 탭 '주문 취소'는 기능명세서상 알림톡 발송 대상이 아니다.
      */
-    cancelOrder: function (orderId, reason) {
+    cancelOrder: function (orderId, reason, notifyKind) {
       var order = db.orders.find(function (o) {
         return o.id === orderId;
       });
@@ -952,9 +977,13 @@
       order.status = 'CANCELED';
       order.cancelReason = String(reason).trim();
       order.canceledAt = new Date().toISOString();
+      var log = null;
+      if (notifyKind === 'PAYMENT_CANCELED' || notifyKind === 'RETURNED') {
+        log = pushNotificationLog(order, notifyKind);
+      }
       saveDB(db);
       emit('mock:orders-changed', { reason: 'cancel', orderId: orderId });
-      return withLatency({ order: order });
+      return withLatency({ order: order, notificationLog: log });
     },
 
     /**
@@ -987,13 +1016,7 @@
         return o.id === orderId;
       });
       if (!order) return '';
-      var store = findStore(order.storeId);
-      var customerLabel = order.customerName || '#' + order.orderNo;
-      var location = order.receiveType === 'TABLE_SERVICE' ? '테이블 ' + order.tableOrPickupNo + '번' : '카운터';
-      return (
-        '[' + (store ? store.name : '') + '] ' + customerLabel + '님, 주문하신 메뉴가 준비되었습니다. ' +
-        location + '에서 수령해 주세요. 주문번호: ' + order.pgOrderNo
-      );
+      return buildNotificationMessage(order, 'PICKUP_CALL');
     },
 
     /**
@@ -1015,6 +1038,7 @@
         id: 'log-' + Date.now() + '-' + Math.floor(Math.random() * 1000),
         orderId: orderId,
         type: 'KAKAO_ALERT',
+        kind: 'PICKUP_CALL',
         status: success ? 'SUCCESS' : 'FAIL',
         sentAt: now,
         message: message,
@@ -1208,68 +1232,6 @@
         qrPct: qrPct,
         tabletPct: tabletPct,
       });
-    },
-
-    /**
-     * GET /events/:eventId/ai-sales-insight
-     * ⚠️ 목업: 실제 AI/LLM 연동이 아니라, 오늘/어제 매출·매출 1위 매장·가장 많이 팔린 메뉴·
-     * 오늘 취소율을 계산해 미리 정해둔 문장 틀에 끼워 넣는 규칙 기반 조합이다. 실제 AI 분석
-     * 기능으로 교체할 때는 이 함수의 "본문만" 실제 LLM API 호출(현재 계산한 통계를 프롬프트에
-     * 담아 전달하거나, 아예 원시 데이터를 서버로 보내 서버가 프롬프트를 구성하는 방식 등)로
-     * 바꾸면 된다 — 반환 형태({ message })와 호출부(eventManagerSales.js)는 그대로 유지 가능하다.
-     */
-    getAiSalesInsight: function (eventId) {
-      var stores = db.stores.filter(function (s) { return s.eventId === eventId; });
-      var storeIds = stores.map(function (s) { return s.id; });
-      var storeIdSet = {};
-      storeIds.forEach(function (id) { storeIdSet[id] = true; });
-      var now = new Date();
-      var todayFrom = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0, 0);
-      var todayTo = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59, 999);
-      var yestFrom = new Date(todayFrom.getTime());
-      yestFrom.setDate(yestFrom.getDate() - 1);
-      var yestTo = new Date(todayTo.getTime());
-      yestTo.setDate(yestTo.getDate() - 1);
-
-      var todayCompleted = ordersInRangeFor(storeIds, { from: todayFrom.toISOString(), to: todayTo.toISOString() });
-      var yestCompleted = ordersInRangeFor(storeIds, { from: yestFrom.toISOString(), to: yestTo.toISOString() });
-      var todaySales = todayCompleted.reduce(function (sum, o) { return sum + o.totalAmount; }, 0);
-      var yestSales = yestCompleted.reduce(function (sum, o) { return sum + o.totalAmount; }, 0);
-
-      var allTodayOrders = db.orders.filter(function (o) {
-        if (!storeIdSet[o.storeId]) return false;
-        var t = new Date(o.orderedAt).getTime();
-        return t >= todayFrom.getTime() && t <= todayTo.getTime();
-      });
-
-      if (allTodayOrders.length === 0) {
-        return withLatency({ message: '오늘은 아직 집계된 주문이 없어요. 주문이 들어오면 인사이트를 보여드릴게요.' });
-      }
-
-      var growthPct = yestSales > 0 ? Math.round(((todaySales - yestSales) / yestSales) * 100) : (todaySales > 0 ? 100 : 0);
-
-      var byStore = {};
-      todayCompleted.forEach(function (o) { byStore[o.storeId] = (byStore[o.storeId] || 0) + o.totalAmount; });
-      var topStoreId = Object.keys(byStore).sort(function (a, b) { return byStore[b] - byStore[a]; })[0];
-      var topStore = topStoreId ? stores.find(function (s) { return s.id === topStoreId; }) : null;
-
-      var todayOrderIds = {};
-      todayCompleted.forEach(function (o) { todayOrderIds[o.id] = true; });
-      var byMenu = {};
-      db.orderItems.forEach(function (it) {
-        if (todayOrderIds[it.orderId]) byMenu[it.menuName] = (byMenu[it.menuName] || 0) + it.quantity;
-      });
-      var topMenuName = Object.keys(byMenu).sort(function (a, b) { return byMenu[b] - byMenu[a]; })[0] || null;
-
-      var canceledToday = allTodayOrders.filter(function (o) { return o.status === 'CANCELED'; }).length;
-      var cancelRatePct = Math.round((canceledToday / allTodayOrders.length) * 1000) / 10;
-
-      var sentence = '오늘 매출은 어제보다 ' + (growthPct >= 0 ? growthPct + '% 증가했어요.' : Math.abs(growthPct) + '% 감소했어요.');
-      if (topStore) sentence += ' ' + topStore.name + pickIGaParticle(topStore.name) + ' 가장 높은 매출(' + byStore[topStoreId].toLocaleString('ko-KR') + '원)을 기록했고,';
-      if (topMenuName) sentence += (topStore ? '' : ' ') + ' 가장 많이 팔린 메뉴는 ' + topMenuName + '예요.';
-      sentence += ' 취소율은 ' + cancelRatePct + '%로 ' + (cancelRatePct >= 5 ? '평소보다 높아요 — 취소 사유를 확인해보는 게 좋겠어요.' : '안정적이에요.');
-
-      return withLatency({ message: sentence });
     },
 
     /** 개발용: 시드 데이터로 초기화 */

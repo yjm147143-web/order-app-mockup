@@ -298,6 +298,15 @@
   }
 
   function salesChartHtml(dimension, data) {
+    if (dimension === 'PERIOD') {
+      if (data.rows.length === 0) return '';
+      return (
+        '<div class="card chart-card">' +
+          '<div class="chart-card-title">기간별 매출 추이</div>' +
+          '<div class="bar-chart-wrap">' + barChartSvg(data.rows, function (r) { return r.label.slice(5).replace('-', '/'); }) + '</div>' +
+        '</div>'
+      );
+    }
     if (dimension === 'HOUR') {
       if (data.rows.length === 0) return '';
       return (
@@ -327,22 +336,36 @@
    * 화면(sales.js)에서 쓰던 것을 행사 담당자 매출현황(메뉴별/매장별 랭킹)에서도 그대로 쓰기
    * 위해 이쪽으로 옮겼다.
    */
-  function breakdownListHtml(data, emptyMessage) {
+  /*
+   * opts.highlightMinMax: 기간별 매출(PERIOD)처럼 랭킹이 아니라 날짜순으로 나열된 목록에서
+   * 최고/최저 매출일을 배지로 강조한다(기능명세서 '일자별 매출 리스트(최고/최저 매출일 강조)').
+   */
+  function breakdownListHtml(data, emptyMessage, opts) {
+    opts = opts || {};
     if (!data.rows || data.rows.length === 0) {
       return (
         '<div class="center-empty" style="padding-top:40px;"><div class="emoji">🗂️</div><div class="title">' +
         escapeHtml(emptyMessage || '해당 기간의 매출이 없어요') + '</div></div>'
       );
     }
+    var maxRow = null, minRow = null;
+    if (opts.highlightMinMax && data.rows.length > 1) {
+      maxRow = data.rows.reduce(function (m, r) { return r.amount > m.amount ? r : m; }, data.rows[0]);
+      minRow = data.rows.reduce(function (m, r) { return r.amount < m.amount ? r : m; }, data.rows[0]);
+      if (minRow === maxRow) minRow = null;
+    }
     return (
       '<div class="card">' +
       data.rows
         .map(function (row, idx) {
           var pct = data.totalAmount > 0 ? Math.round((row.amount / data.totalAmount) * 100) : 0;
+          var highlightBadge = '';
+          if (row === maxRow) highlightBadge = badge('최고 매출일', 'dark');
+          else if (row === minRow) highlightBadge = badge('최저 매출일', 'danger-soft');
           return (
             '<div class="sales-breakdown-row">' +
               '<span class="sales-breakdown-rank">' + (idx + 1) + '</span>' +
-              '<span class="sales-breakdown-label">' + escapeHtml(row.label) + (row.sub ? '<div class="sales-breakdown-sub">' + escapeHtml(row.sub) + '</div>' : '') + '</span>' +
+              '<span class="sales-breakdown-label">' + escapeHtml(row.label) + (highlightBadge ? ' ' + highlightBadge : '') + (row.sub ? '<div class="sales-breakdown-sub">' + escapeHtml(row.sub) + '</div>' : '') + '</span>' +
               '<span class="sales-breakdown-amount">' + formatWon(row.amount) + ' <span class="sales-breakdown-sub">(' + pct + '%)</span></span>' +
             '</div>'
           );

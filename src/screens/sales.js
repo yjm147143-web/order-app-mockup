@@ -117,7 +117,7 @@
     root.querySelector('#sales-total').textContent = UI.formatWon(data.totalAmount);
     root.querySelector('#sales-order-count').textContent = '주문 ' + data.orderCount + '건 기준';
     root.querySelector('#sales-chart-host').innerHTML = UI.salesChartHtml(currentDimension, data);
-    root.querySelector('#sales-breakdown-list').innerHTML = UI.breakdownListHtml(data, '해당 기간의 매출이 없어요');
+    root.querySelector('#sales-breakdown-list').innerHTML = UI.breakdownListHtml(data, '해당 기간의 매출이 없어요', { highlightMinMax: currentDimension === 'PERIOD' });
   }
 
   function mount(root) {

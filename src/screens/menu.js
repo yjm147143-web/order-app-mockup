@@ -361,6 +361,7 @@
             imageUrl: existing.imageUrl || '',
             isVisible: existing.isVisible,
             stockQuantity: existing.stockQuantity === null || existing.stockQuantity === undefined ? '' : String(existing.stockQuantity),
+            autoSoldout: existing.autoSoldout !== false,
             origin: existing.origin || '',
             optionGroupsEnabled: (existing.optionGroups || []).length > 0,
             optionGroups: JSON.parse(JSON.stringify(existing.optionGroups || [])),
@@ -373,6 +374,7 @@
             imageUrl: '',
             isVisible: true,
             stockQuantity: '',
+            autoSoldout: true,
             origin: '',
             optionGroupsEnabled: false,
             optionGroups: [],
@@ -421,9 +423,22 @@
                 '</div>' +
               '</div>' +
               '<div class="input-group">' +
-                '<label class="input-label">재고 수량 (선택)</label>' +
+                '<label class="input-label">재고 수량' + (draftMenu.autoSoldout ? '' : ' (선택)') + '</label>' +
                 '<input class="input-field" id="menu-form-stock" type="number" min="0" value="' + UI.escapeHtml(draftMenu.stockQuantity) + '" placeholder="무제한" />' +
-                '<div class="char-counter" style="text-align:left;">비워두면 재고 관리를 하지 않는 메뉴(무제한)로 처리돼요.</div>' +
+                '<div class="char-counter" style="text-align:left;">' +
+                  (draftMenu.autoSoldout
+                    ? '자동품절이 켜져 있어 재고 수량 입력이 필요해요.'
+                    : '비워두면 재고 관리를 하지 않는 메뉴(무제한)로 처리돼요.') +
+                '</div>' +
+              '</div>' +
+              '<div class="input-group">' +
+                '<div class="toggle-row">' +
+                  '<label class="input-label" style="margin:0;">자동품절 여부</label>' +
+                  UI.toggle(draftMenu.autoSoldout, 'toggle-auto-soldout') +
+                '</div>' +
+                '<div class="visibility-hint">' +
+                  (draftMenu.autoSoldout ? '재고 수량이 0이 되면 자동으로 품절 처리돼요.' : '꺼두면 재고가 0이 되어도 직접 품절 처리해야 해요.') +
+                '</div>' +
               '</div>' +
               '<div class="input-group">' +
                 '<label class="input-label">원산지 (선택)</label>' +
@@ -581,6 +596,9 @@
       if (draftMenu.stockQuantity !== '' && (isNaN(Number(draftMenu.stockQuantity)) || Number(draftMenu.stockQuantity) < 0)) {
         errors.push('재고 수량은 0 이상 숫자로 입력해주세요.');
       }
+      if (draftMenu.autoSoldout && draftMenu.stockQuantity === '') {
+        errors.push('자동품절을 사용하려면 재고 수량을 입력해주세요.');
+      }
       return errors;
     }
 
@@ -673,6 +691,11 @@
         updateSaveButtonState();
       });
 
+      host.querySelector('[data-action="toggle-auto-soldout"]').addEventListener('click', function () {
+        draftMenu.autoSoldout = !draftMenu.autoSoldout;
+        renderMenuFormModal();
+      });
+
       var originInput = host.querySelector('#menu-form-origin');
       originInput.addEventListener('input', function () {
         draftMenu.origin = originInput.value;
@@ -698,6 +721,7 @@
           imageUrl: draftMenu.imageUrl || '',
           isVisible: draftMenu.isVisible,
           stockQuantity: draftMenu.stockQuantity === '' ? null : Number(draftMenu.stockQuantity),
+          autoSoldout: draftMenu.autoSoldout,
           origin: draftMenu.origin.trim(),
           optionGroups: !draftMenu.optionGroupsEnabled
             ? []

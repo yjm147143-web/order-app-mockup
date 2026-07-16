@@ -77,7 +77,7 @@
 
   function mount(root) {
     var storeId = AppState.get().currentStoreId;
-    var state = { guideEnabled: true, menuCountUnit: 5, minutesPerUnit: 10, maxMinutes: 60, activeMenuQty: 0 };
+    var state = { guideEnabled: true, menuCountUnit: 5, minutesPerUnit: 10, maxMinutes: 60, activeMenuQty: 0, activeOrderCount: 0 };
 
     root.querySelector('[data-action="go-back"]').addEventListener('click', function () {
       Router.showScreen('settings');
@@ -105,9 +105,9 @@
       var previewHost = root.querySelector('#wait-preview-card');
       previewHost.innerHTML =
         '<div class="wait-calc-actual-box">' +
-          '<div style="font-weight:800;margin-bottom:4px;">지금 실제 예상 대기시간</div>' +
-          '<div class="helper-text" style="text-align:left;">현재 대기·접수 메뉴 수량 ' + state.activeMenuQty + '개 기준</div>' +
-          '<div style="font-size:19px;font-weight:800;margin-top:4px;">약 ' + actual.final + '분 이내' + (actual.capped ? ' <span style="font-size:12px;font-weight:700;color:var(--color-text-secondary);">(최대값으로 고정됨)</span>' : '') + '</div>' +
+          '<div class="helper-text" style="text-align:left;">고객에게 보이는 화면이에요.</div>' +
+          '<div style="font-size:15px;margin-top:6px;">접수된 주문이 ' + state.activeOrderCount + '개일 경우</div>' +
+          '<div style="font-size:19px;font-weight:800;margin-top:4px;">현재 예상 대기 시간은 ' + actual.final + '분 입니다' + (actual.capped ? ' <span style="font-size:12px;font-weight:700;color:var(--color-text-secondary);">(최대값으로 고정됨)</span>' : '') + '</div>' +
         '</div>';
     }
 

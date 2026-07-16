@@ -4,16 +4,20 @@
  * fetch(real endpoint) 로 교체하면 된다. (엔드포인트 매핑은 src/api/mockApi.js 상단 주석 참고)
  *
  * 데이터 모델
- * - Event(행사): id, name, location, startDate, endDate, status(예정|진행중|종료)
- *                (행사 1개는 매장을 여러 개 포함하고, 매장은 정확히 1개의 행사에 소속된다 — Store.eventId 참고)
+ * - Event(행사): id, name, location, startDate, endDate, status(예정|진행중|마감)
+ *                (행사 1개는 매장을 여러 개 포함하고, 매장은 정확히 1개의 행사에 소속된다 — Store.eventId 참고.
+ *                 status는 시드값 그대로 쓰지 않고 항상 startDate/endDate 기준으로 오늘 날짜와 비교해 계산한다
+ *                 — 오늘이 시작 전이면 예정, 기간 중이면 진행중, 종료일이 지났으면 마감. 기능명세서 표기(진행중/
+ *                 예정/마감)와 매장 영업상태의 '마감'은 이름은 같지만 서로 다른 축이다.)
  * - Store: id, name, address, phone, operatingStatus(CLOSED|OPEN|PAUSED), businessHours,
- *          autoSoldoutOnZeroStock, autoAcceptOrders, waitTimeGuideEnabled, waitTimeMenuCountUnit,
+ *          autoAcceptOrders, waitTimeGuideEnabled, waitTimeMenuCountUnit,
  *          waitTimeMinutesPerUnit, waitTimeMaxMinutes, eventId, boothNumber,
- *          todaySalesAmount, todayOrderCount, totalSalesAmount, lastOrderAt, statusChangedAt
+ *          todaySalesAmount, todayOrderCount, totalSalesAmount, totalOrderCount, lastOrderAt, statusChangedAt
  *          (CLOSED=마감, OPEN=영업중, PAUSED=일시중지. 신규 주문 생성은 OPEN일 때만 허용된다.
- *           autoSoldoutOnZeroStock: 메뉴 재고가 0이 되면 자동으로 품절 처리할지 여부, 기본값 true.
+ *           자동품절 여부는 더 이상 매장 전체 공통 설정이 아니다 — 기능명세서 기준 메뉴 항목별 필드로
+ *           옮겨졌다(MenuItem.autoSoldout 참고).
  *           autoAcceptOrders: 신규 주문을 대기(WAITING) 없이 바로 접수(RECEIVED)로 자동 수락할지 여부,
- *           기본값 false(수동 수락).
+ *           기본값 true(자동 수락 — 기능명세서의 자동수락 여부 토글 디폴트값).
  *           예상 대기시간은 더 이상 사장님이 직접 입력하는 고정값이 아니다 — 설정 > '예상
  *           대기시간 관리' 화면에서 "대기 메뉴 (N)개당 예상 시간 (M)분" 기준을 정해두면,
  *           현재 대기/접수 탭에 남아있는 미완료 주문의 메뉴 항목 총 수량을 기준으로 매번
@@ -23,10 +27,10 @@
  *           조정). waitTimeMaxMinutes: 계산값이 이 값을 넘으면 이 값으로 고정해서 보여준다
  *           (예: 최대 30분으로 설정해두면 계산상 45분이 나와도 "약 30분 이내"로 안내).
  *           eventId: 이 매장(부스)이 소속된 행사. boothNumber: 부스 번호(선택, 없으면 null).
- *           todaySalesAmount/todayOrderCount/totalSalesAmount: 행사 담당자용 홈 대시보드/매장
- *           현황 화면에서 쓸 목업 집계값 — 실제로는 Order 데이터에서 계산되어야 하지만, 이번
- *           단계는 매장을 대량으로 시드하는 것이 목적이라 모든 매장에 실제 주문 데이터를 채우는
- *           대신 간단한 고정 집계값으로 대체했다(totalSalesAmount = 행사 시작 이후 누적 매출).
+ *           todaySalesAmount/todayOrderCount/totalSalesAmount/totalOrderCount: 행사 담당자용 홈
+ *           대시보드/매출현황 화면에서 쓸 목업 집계값 — 실제로는 Order 데이터에서 계산되어야 하지만,
+ *           이번 단계는 매장을 대량으로 시드하는 것이 목적이라 모든 매장에 실제 주문 데이터를 채우는
+ *           대신 간단한 고정 집계값으로 대체했다(totalSalesAmount/totalOrderCount = 행사 시작 이후 누적).
  *           store-1(브루웍스 성수점)만 예외적으로 실제 Order/MenuItem 데이터를 갖고 있다 — 기존
  *           사장님 앱 데모 계정(owner/1234)이 그대로 쓰는 매장이기 때문.
  *           lastOrderAt: 이 매장의 가장 최근 주문 시각(홈 대시보드의 "1시간 이상 신규 주문 없음"
@@ -41,18 +45,19 @@
  * - User: id, loginId, password, name, role(OWNER|STAFF|EVENT_MANAGER), storeIds[](OWNER/STAFF용),
  *         eventIds[](EVENT_MANAGER용 — 담당 행사 목록. 이 행사에 속한 모든 매장의 데이터에 접근 가능하다는
  *         뜻이며, 실제 접근 범위 제한은 화면/API 단에서 eventId -> storeIds로 풀어서 검사해야 한다.)
- *         STAFF 전용 필드: phone, isActive(비활성화된 직원은 로그인 불가 — mockApi.login에서 함께 검사),
- *         permissions{ orderManage, menuManage, salesView, settingsChange }(권한 토글, 화면에서
- *         사장님이 켜고 끔). OWNER는 이 필드가 없고 코드상 항상 모든 권한을 가진 것으로 취급하며
- *         직원 계정 관리 화면에서 오너 권한은 수정할 수 없다.
+ *         STAFF 전용 필드: phone, email(비밀번호 찾기·계정 안내 발송용), usagePeriod('ALWAYS' 상시 |
+ *         { start, end } 기간설정), isActive(비활성화된 직원은 로그인 불가 — mockApi.login에서 함께 검사).
+ *         기능명세서 기준 STAFF는 항상 고정된 '직원' 권한(주문 처리만 가능)이며 화면에서 개별적으로
+ *         켜고 끌 수 있는 권한 토글은 없다 — 매출·환불·정산·메뉴 변경은 OWNER 계정 전용이다.
  * - MenuCategory: id, storeId, name, sortOrder, isHidden
  *                 (isHidden: 연결된 메뉴가 있어 진짜 삭제 대신 숨김 처리된 경우 true)
  * - MenuItem: id, categoryId, name, description, price, imageUrl, isSoldout, isVisible, isDeleted,
- *             sortOrder, optionGroups, stockQuantity, origin
+ *             sortOrder, optionGroups, stockQuantity, autoSoldout, origin
  *             (isDeleted: 소프트 삭제 플래그. isVisible과 별개 — isVisible은 "지금 노출 여부"를
  *              사장님이 직접 켜고 끄는 값이고, isDeleted는 "삭제됨"을 나타내는 값이다.
  *              stockQuantity: null이면 재고 관리를 쓰지 않는(무제한) 메뉴, 숫자면 남은 재고 수량 —
- *              0이 되고 매장의 autoSoldoutOnZeroStock이 켜져 있으면 자동으로 isSoldout=true 처리.
+ *              autoSoldout이 켜져 있고(기본값 true) 재고가 0이 되면 자동으로 isSoldout=true 처리, 꺼져
+ *              있으면 재고가 0이 되어도 사장님이 수동으로 품절 처리해야 한다.
  *              예상 조리시간은 메뉴별 필드가 아니다 — 매장 전체 공통 계산식(Store.waitTimeMenuCountUnit/
  *              waitTimeMinutesPerUnit) 참고. origin: 원산지 표기(선택, 빈 문자열 가능).
  *              optionGroups: [{ id, name, required, multiSelect,
@@ -65,7 +70,7 @@
  *           RECEIVED(접수, 수락 후 완료 전까지 계속 머무르며 이 안에서 몇 번이든 고객 호출 가능) ->
  *           COMPLETED(완료). WAITING에서 RECEIVED를 건너뛰고 바로 COMPLETED로 처리하는 것도 허용된다.
  *           CANCELED는 COMPLETED 이후에도 가능(이미 CANCELED인 주문만 재취소 불가), cancelReason은
- *           품절|고객요청|오류|직접 입력한 문자열 중 하나.
+ *           품절|고객요청|직접 입력한 문자열 중 하나.
  *           completedCount: 이 주문이 COMPLETED로 전이된 누적 횟수 — 완료 후 되돌리기(→RECEIVED)를
  *           했다가 다시 완료 처리하면 1씩 더 늘어난다(되돌리기 자체는 이 값을 줄이지 않는다).
  *           storeId: 이 주문이 속한 매장 — 매장이 여러 개가 된 이후 추가된 필드(행사 개편 참고).
@@ -79,15 +84,6 @@
  * - OrderItem: id, orderId, menuItemId, menuName, unitPrice, quantity, optionsSummary
  *              (menuName/unitPrice 는 주문 시점 스냅샷 — 메뉴가 나중에 바뀌어도 과거 주문엔 영향 없음)
  * - NotificationLog: id, orderId, type(KAKAO_ALERT), status(SUCCESS|FAIL), sentAt, message
- * - AuditLog(감사 로그): id, actorUserId, actorRole, action, targetStoreIds[], beforeStatus,
- *          afterStatus, resultSummary, timestamp
- *          (행사 담당자가 매장 현황 화면에서 전체/선택 매장을 일괄 상태 변경할 때마다 하나의
- *           로그 항목이 쌓인다 — targetStoreIds가 여러 개일 수 있으므로(일괄 조치 한 번 = 로그
- *           한 건) beforeStatus는 매장마다 다를 수 있어 일괄 조치에서는 null로 둔다(afterStatus만
- *           의미 있음). action은 "행사담당자 OO님이 전체/선택한 N개 매장을 OO(으)로 변경" 형태의
- *           사람이 읽을 문장. resultSummary는 "성공 N개 · 이미 같은 상태 N개 · 실패 N개" 형태.
- *           개별 매장 하나만 바로 바꾸는 조작(매장 현황 리스트의 개별 버튼)은 즉시 반영되는 가벼운
- *           동작으로 취급해 로그를 남기지 않는다 — 감사 로그는 "일괄 조치" 전용이다.)
  */
 
 (function () {
@@ -120,8 +116,7 @@
     phone: '02-1234-5678',
     operatingStatus: 'OPEN',
     businessHours: '09:00 - 21:00',
-    autoSoldoutOnZeroStock: true,
-    autoAcceptOrders: false,
+    autoAcceptOrders: true,
     waitTimeGuideEnabled: true,
     waitTimeMenuCountUnit: 5,
     waitTimeMinutesPerUnit: 10,
@@ -131,6 +126,7 @@
     todaySalesAmount: 245000,
     todayOrderCount: 32,
     totalSalesAmount: 3200000,
+    totalOrderCount: 410,
     lastOrderAt: minutesAgo(2),
     statusChangedAt: minutesAgo(500),
     ownerName: '김사장',
@@ -155,8 +151,7 @@
       phone: '02-1234-' + String(5700 + seq).padStart(4, '0'),
       operatingStatus: STATUS_CYCLE[idx % STATUS_CYCLE.length],
       businessHours: '11:00 - 20:00',
-      autoSoldoutOnZeroStock: true,
-      autoAcceptOrders: false,
+      autoAcceptOrders: true,
       waitTimeGuideEnabled: true,
       waitTimeMenuCountUnit: 5,
       waitTimeMinutesPerUnit: 10,
@@ -166,6 +161,7 @@
       todaySalesAmount: 60000 + idx * 41000,
       todayOrderCount: 6 + idx * 4,
       totalSalesAmount: 600000 + idx * 410000,
+      totalOrderCount: 80 + idx * 55,
       lastOrderAt: minutesAgo(3 + idx * 4), // 기본은 최근에도 주문이 들어온 것으로 — 정상 매장들
       statusChangedAt: minutesAgo(120 + idx * 10), // CLOSED/PAUSED 매장은 이 값으로 "얼마나 오래" 그 상태였는지 판단
       ownerName: OWNER_SURNAMES[idx % OWNER_SURNAMES.length] + '사장',
@@ -194,8 +190,7 @@
       phone: '02-9876-' + String(1000 + seq).padStart(4, '0'),
       operatingStatus: idx === 0 ? 'OPEN' : 'CLOSED',
       businessHours: '12:00 - 21:00',
-      autoSoldoutOnZeroStock: true,
-      autoAcceptOrders: false,
+      autoAcceptOrders: true,
       waitTimeGuideEnabled: true,
       waitTimeMenuCountUnit: 5,
       waitTimeMinutesPerUnit: 10,
@@ -205,6 +200,7 @@
       todaySalesAmount: 0,
       todayOrderCount: 0,
       totalSalesAmount: 0,
+      totalOrderCount: 0,
       lastOrderAt: null,
       statusChangedAt: null,
       ownerName: OWNER_SURNAMES[(idx + 5) % OWNER_SURNAMES.length] + '사장',
@@ -229,10 +225,11 @@
       password: '1234',
       name: '이알바',
       phone: '010-2222-3333',
+      email: 'staff1@example.com',
+      usagePeriod: { type: 'ALWAYS' },
       role: 'STAFF',
       storeIds: ['store-1'],
       isActive: true,
-      permissions: { orderManage: true, menuManage: false, salesView: false, settingsChange: false },
     },
     {
       id: 'user-staff-2',
@@ -240,10 +237,11 @@
       password: '1234',
       name: '최파트',
       phone: '010-4444-5555',
+      email: 'staff2@example.com',
+      usagePeriod: { type: 'PERIOD', start: daysFromNow(-10), end: daysFromNow(20) },
       role: 'STAFF',
       storeIds: ['store-1'],
       isActive: false,
-      permissions: { orderManage: true, menuManage: true, salesView: false, settingsChange: false },
     },
     {
       id: 'user-event-manager-1',
@@ -270,7 +268,7 @@
   ];
 
   var MENU_ITEMS = [
-    { id: 'menu-1', categoryId: 'cat-1', name: '아메리카노', description: '깔끔한 원두 본연의 맛', price: 4500, imageUrl: '', isSoldout: false, isVisible: true, isDeleted: false, sortOrder: 1, stockQuantity: null, origin: '콜롬비아산 원두', optionGroups: [
+    { id: 'menu-1', categoryId: 'cat-1', name: '아메리카노', description: '깔끔한 원두 본연의 맛', price: 4500, imageUrl: '', isSoldout: false, isVisible: true, isDeleted: false, sortOrder: 1, stockQuantity: null, autoSoldout: true, origin: '콜롬비아산 원두', optionGroups: [
       { id: 'og-1', name: '온도 선택', required: true, multiSelect: false, options: [
         { id: 'opt-1', name: '아이스', extraPrice: 0, isSoldout: false },
         { id: 'opt-2', name: '따뜻하게', extraPrice: 0, isSoldout: false },
@@ -280,12 +278,12 @@
         { id: 'opt-4', name: '샷 2추가', extraPrice: 900, isSoldout: true },
       ] },
     ] },
-    { id: 'menu-2', categoryId: 'cat-1', name: '카페라떼', description: '부드러운 우유와 에스프레소', price: 5000, imageUrl: '', isSoldout: false, isVisible: true, isDeleted: false, sortOrder: 2, stockQuantity: null, origin: '국내산 우유', optionGroups: [] },
-    { id: 'menu-3', categoryId: 'cat-1', name: '바닐라라떼', description: '달콤한 바닐라 시럽 추가', price: 5500, imageUrl: '', isSoldout: false, isVisible: true, isDeleted: false, sortOrder: 3, stockQuantity: 8, origin: '', optionGroups: [] },
-    { id: 'menu-4', categoryId: 'cat-2', name: '자몽에이드', description: '상큼한 자몽 과육 가득', price: 5800, imageUrl: '', isSoldout: false, isVisible: true, isDeleted: false, sortOrder: 1, stockQuantity: 5, origin: '제주산 자몽', optionGroups: [] },
-    { id: 'menu-5', categoryId: 'cat-2', name: '복숭아 아이스티', description: '달콤한 복숭아 향', price: 5300, imageUrl: '', isSoldout: true, isVisible: true, isDeleted: false, sortOrder: 2, stockQuantity: 0, origin: '', optionGroups: [] },
-    { id: 'menu-6', categoryId: 'cat-3', name: '치즈케이크', description: '진한 크림치즈 풍미', price: 6500, imageUrl: '', isSoldout: false, isVisible: true, isDeleted: false, sortOrder: 1, stockQuantity: null, origin: '', optionGroups: [] },
-    { id: 'menu-7', categoryId: 'cat-3', name: '크루아상', description: '겉바속촉 버터 크루아상', price: 4200, imageUrl: '', isSoldout: false, isVisible: true, isDeleted: false, sortOrder: 2, stockQuantity: 15, origin: '국내산 밀가루', optionGroups: [] },
+    { id: 'menu-2', categoryId: 'cat-1', name: '카페라떼', description: '부드러운 우유와 에스프레소', price: 5000, imageUrl: '', isSoldout: false, isVisible: true, isDeleted: false, sortOrder: 2, stockQuantity: null, autoSoldout: true, origin: '국내산 우유', optionGroups: [] },
+    { id: 'menu-3', categoryId: 'cat-1', name: '바닐라라떼', description: '달콤한 바닐라 시럽 추가', price: 5500, imageUrl: '', isSoldout: false, isVisible: true, isDeleted: false, sortOrder: 3, stockQuantity: 8, autoSoldout: true, origin: '', optionGroups: [] },
+    { id: 'menu-4', categoryId: 'cat-2', name: '자몽에이드', description: '상큼한 자몽 과육 가득', price: 5800, imageUrl: '', isSoldout: false, isVisible: true, isDeleted: false, sortOrder: 1, stockQuantity: 5, autoSoldout: false, origin: '제주산 자몽', optionGroups: [] },
+    { id: 'menu-5', categoryId: 'cat-2', name: '복숭아 아이스티', description: '달콤한 복숭아 향', price: 5300, imageUrl: '', isSoldout: true, isVisible: true, isDeleted: false, sortOrder: 2, stockQuantity: 0, autoSoldout: true, origin: '', optionGroups: [] },
+    { id: 'menu-6', categoryId: 'cat-3', name: '치즈케이크', description: '진한 크림치즈 풍미', price: 6500, imageUrl: '', isSoldout: false, isVisible: true, isDeleted: false, sortOrder: 1, stockQuantity: null, autoSoldout: true, origin: '', optionGroups: [] },
+    { id: 'menu-7', categoryId: 'cat-3', name: '크루아상', description: '겉바속촉 버터 크루아상', price: 4200, imageUrl: '', isSoldout: false, isVisible: true, isDeleted: false, sortOrder: 2, stockQuantity: 15, autoSoldout: true, origin: '국내산 밀가루', optionGroups: [] },
   ];
 
   // 오늘자 더미 주문 (대시보드 요약 계산용) — 항상 "지금 기준 오늘"처럼 보이도록 상대 시간으로 생성
@@ -323,8 +321,6 @@
     { id: 'log-2', orderId: 'order-2', type: 'KAKAO_ALERT', status: 'FAIL', sentAt: minutesAgo(168), message: '[브루웍스 성수점] 박준호님, 주문하신 메뉴가 준비되었습니다.' },
   ];
 
-  var AUDIT_LOGS = []; // 행사 담당자의 매장 일괄 조치 이력 — 다음 단계에서 실제로 쌓일 예정 (구조는 상단 주석 참고)
-
   window.MockData = {
     EVENTS: EVENTS,
     STORES: STORES,
@@ -335,6 +331,5 @@
     ORDER_ITEMS: ORDER_ITEMS,
     NOTIFICATION_LOGS: NOTIFICATION_LOGS,
     NEXT_ORDER_NO: NEXT_ORDER_NO,
-    AUDIT_LOGS: AUDIT_LOGS,
   };
 })();

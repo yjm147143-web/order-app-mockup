@@ -41,7 +41,7 @@
     { key: 'RECEIVED', label: '접수' },
     { key: 'DONE', label: '완료' },
   ];
-  var CANCEL_REASONS = ['품절', '고객요청', '오류'];
+  var CANCEL_REASONS = ['품절', '고객요청'];
   var CUSTOM_REASON_KEY = 'CUSTOM';
   var REFRESH_INTERVAL_MS = 20000;
 
@@ -65,10 +65,13 @@
     });
   }
 
+  // '고객 호출' 알림톡 이력만 — 주문 수락/결제 취소/반품 알림톡(kind가 다름)은 호출 횟수·호출
+  // 이력에 섞이면 안 된다. 과거 시드 데이터(log-1/log-2)는 kind 필드가 없던 시절 기록이라 없으면
+  // 호출로 간주한다(하위 호환).
   function historyOf(orderId) {
     return logsCache
       .filter(function (l) {
-        return l.orderId === orderId;
+        return l.orderId === orderId && (!l.kind || l.kind === 'PICKUP_CALL');
       })
       .sort(function (a, b) {
         return new Date(b.sentAt) - new Date(a.sentAt);
@@ -79,7 +82,8 @@
     var items = itemsOf(orderId);
     if (items.length === 0) return '-';
     var extraCount = items.length - 1;
-    return extraCount > 0 ? items[0].menuName + ' 외 ' + extraCount + '건' : items[0].menuName;
+    if (extraCount > 0) return items[0].menuName + ' 외 ' + extraCount + '건';
+    return items[0].quantity > 1 ? items[0].menuName + ' ' + items[0].quantity + '개' : items[0].menuName;
   }
 
   function segmentOf(order) {
@@ -97,15 +101,16 @@
       variant: 'primary',
       disabled: offline || order.status === 'CANCELED',
     };
-    var cancelBtn = { label: '주문 취소', action: 'cancel-btn', variant: 'danger-solid', disabled: offline || order.status === 'CANCELED' };
 
     if (segment === 'WAITING') {
       var acceptBtn = { label: '주문 수락', action: 'accept-btn', variant: 'success', disabled: offline };
-      return [acceptBtn, cancelBtn];
+      var waitingCancelBtn = { label: '주문 취소', action: 'cancel-btn', variant: 'danger-solid', disabled: offline || order.status === 'CANCELED' };
+      return [acceptBtn, waitingCancelBtn];
     }
     if (segment === 'DONE') {
       var revertBtn = { label: '되돌리기', action: 'revert-btn', variant: 'outline', disabled: offline || order.status !== 'COMPLETED' };
-      return [revertBtn, cancelBtn];
+      var returnBtn = { label: '반품', action: 'cancel-btn', variant: 'danger-solid', disabled: offline || order.status === 'CANCELED' };
+      return [revertBtn, returnBtn];
     }
     // RECEIVED
     var completeBtn = {
@@ -114,7 +119,8 @@
       variant: 'success',
       disabled: offline || order.status === 'COMPLETED' || order.status === 'CANCELED',
     };
-    return [callBtn, completeBtn, cancelBtn];
+    var paymentCancelBtn = { label: '결제 취소', action: 'cancel-btn', variant: 'danger-solid', disabled: offline || order.status === 'CANCELED' };
+    return [callBtn, completeBtn, paymentCancelBtn];
   }
 
   function render() {
@@ -172,6 +178,7 @@
       detailBody =
         '<div class="order-card-expand">' +
           '<div class="order-item-row"><span>PG 주문번호</span><span>' + UI.escapeHtml(order.pgOrderNo) + '</span></div>' +
+          '<div class="order-item-row"><span>결제 수단</span><span>' + UI.escapeHtml(order.paymentMethod || '-') + '</span></div>' +
           items
             .map(function (it) {
               return (
@@ -181,27 +188,29 @@
               );
             })
             .join('') +
-          '<div class="order-item-row" style="font-weight:800;"><span>결제금액</span><span>' + UI.formatWon(order.totalAmount) + '</span></div>' +
           callNoticeHtml +
         '</div>';
     }
 
+    var isCalled = order.callStatus === 'CALLED' || order.callStatus === 'FAILED';
+
     return (
-      '<div class="order-card ' + (isCanceled ? 'canceled ' : '') + '" data-order-id="' + order.id + '">' +
+      '<div class="order-card ' + (isCanceled ? 'canceled ' : '') + (isCalled ? 'called ' : '') + '" data-order-id="' + order.id + '">' +
         '<div class="order-card-header-row">' +
           '<label class="order-checkbox-label"><input type="checkbox" class="order-select-checkbox" data-order-id="' + order.id + '" ' +
             (selectedIds[order.id] ? 'checked' : '') + ' /></label>' +
           UI.channelBadgeHtml(order) +
           UI.orderTypeBadgeHtml(order) +
+          (isCalled ? UI.badge('호출됨', 'dark') : '') +
         '</div>' +
         '<div class="order-card-main">' +
           '<div class="order-card-content-row">' +
             '<div class="order-card-menu-main">' + UI.escapeHtml(menuSummary(order.id)) + '</div>' +
             UI.pickupBlockHtml(order) +
           '</div>' +
-          '<div class="order-card-time-emphasized">' + UI.clockLabel24(order.orderedAt) + ' · ' + UI.elapsedLabel(order.orderedAt) + '</div>' +
+          '<div class="order-card-time-emphasized">' + UI.clockLabel24(order.orderedAt) + ' 주문 (' + UI.elapsedLabel(order.orderedAt) + ')</div>' +
           UI.phoneRowHtml(order) +
-          '<div class="order-card-amount">' + UI.formatWon(order.totalAmount) + ' · ' + UI.escapeHtml(order.paymentMethod || '-') + '</div>' +
+          '<div class="order-card-amount">' + UI.formatWon(order.totalAmount) + '</div>' +
           (isCanceled ? '<div class="order-card-cancel-reason">취소 사유: ' + UI.escapeHtml(order.cancelReason || '-') + '</div>' : '') +
         '</div>' +
         '<div class="order-card-actions">' +
@@ -295,7 +304,7 @@
             UI.Icons.filter +
             '<span>' + UI.escapeHtml(filterLabel) + '</span>' +
           '</button>' +
-          '<button class="filter-pill-btn" data-action="toggle-sort-direction">' +
+          '<button class="filter-pill-btn" data-action="open-sort-sheet">' +
             UI.Icons.sort +
             '<span>' + sortLabel + '</span>' +
           '</button>' +
@@ -306,10 +315,49 @@
           openMenuFilterSheet(menuNames);
         });
       }
-      host.querySelector('[data-action="toggle-sort-direction"]').addEventListener('click', function () {
-        sortDirection = sortDirection === 'ASC' ? 'DESC' : 'ASC';
-        renderMenuFilter();
-        renderList();
+      host.querySelector('[data-action="open-sort-sheet"]').addEventListener('click', openSortSheet);
+    }
+
+    // 정렬 선택창 — '접수 시간' 기준 오름차순/내림차순을 고르는 바텀시트(선택창)
+    function openSortSheet() {
+      var host = root.querySelector('#customer-modal-host');
+
+      function optionRow(value, label) {
+        var isSelected = sortDirection === value;
+        return (
+          '<button class="filter-sheet-option ' + (isSelected ? 'selected' : '') + '" data-action="pick-sort" data-value="' + value + '">' +
+            '<span>' + UI.escapeHtml(label) + '</span>' +
+            (isSelected ? '<span class="filter-sheet-check">✓</span>' : '') +
+          '</button>'
+        );
+      }
+
+      host.innerHTML =
+        '<div class="modal-overlay modal-overlay-bottom" id="sort-sheet-overlay">' +
+          '<div class="modal-sheet">' +
+            '<div class="modal-sheet-header">' +
+              '<span class="modal-sheet-title">접수 시간순 정렬</span>' +
+              '<button class="icon-btn" data-action="close-modal">' + UI.Icons.close + '</button>' +
+            '</div>' +
+            '<div class="modal-sheet-body">' +
+              '<div class="filter-sheet-list">' +
+                optionRow('ASC', '오름차순 · 먼저 주문한 손님이 위') +
+                optionRow('DESC', '내림차순 · 최근 주문한 손님이 위') +
+              '</div>' +
+            '</div>' +
+          '</div>' +
+        '</div>';
+
+      var overlay = host.querySelector('#sort-sheet-overlay');
+      overlay.addEventListener('click', function (e) { if (e.target === overlay) closeModal(); });
+      host.querySelector('[data-action="close-modal"]').addEventListener('click', closeModal);
+      host.querySelectorAll('[data-action="pick-sort"]').forEach(function (el) {
+        el.addEventListener('click', function () {
+          sortDirection = el.getAttribute('data-value');
+          closeModal();
+          renderMenuFilter();
+          renderList();
+        });
       });
     }
 
@@ -394,14 +442,14 @@
       var host = root.querySelector('#order-status-pill-host');
       var meta =
         {
-          OPEN: { label: '영업 중', dotClass: 'open' },
-          PAUSED: { label: '일시중지', dotClass: 'paused' },
-          CLOSED: { label: '영업 마감', dotClass: 'closed' },
-        }[operatingStatus] || { label: '-', dotClass: '' };
+          OPEN: { emoji: '🟢', label: '영업 중' },
+          PAUSED: { emoji: '🟠', label: '일시중지' },
+          CLOSED: { emoji: '🔴', label: '마감' },
+        }[operatingStatus] || { emoji: '', label: '-' };
 
       host.innerHTML =
         '<button class="order-status-pill" data-action="go-settings-status">' +
-          '<span class="operating-status-dot ' + meta.dotClass + '"></span>' +
+          '<span>' + meta.emoji + '</span>' +
           '<span>' + meta.label + '</span>' +
         '</button>';
 
@@ -449,8 +497,9 @@
       var listEl = root.querySelector('#order-list');
       var groups = getGroupsForActiveSegment();
       if (groups.length === 0) {
+        var emptyTitle = searchQuery.trim() ? '검색 결과가 없어요' : '주문이 없어요';
         listEl.innerHTML =
-          '<div class="center-empty" style="padding-top:60px;"><div class="emoji">📭</div><div class="title">주문이 없어요</div></div>';
+          '<div class="center-empty" style="padding-top:60px;"><div class="emoji">📭</div><div class="title">' + UI.escapeHtml(emptyTitle) + '</div></div>';
         return;
       }
       listEl.innerHTML = groups
@@ -481,11 +530,9 @@
             if (activeSegment === 'WAITING') {
               bulkButtonsHtml = '<button class="btn-text-sm" data-action="bulk-accept" data-bucket="' + g.key + '" ' + (offline ? 'disabled' : '') + '>일괄 수락</button>';
             } else if (activeSegment === 'RECEIVED') {
-              bulkButtonsHtml =
-                '<button class="btn-text-sm" data-action="bulk-call" data-bucket="' + g.key + '" ' + (offline ? 'disabled' : '') + '>일괄 호출</button>' +
-                '<button class="btn-text-sm" data-action="bulk-complete" data-bucket="' + g.key + '" ' + (offline ? 'disabled' : '') + '>일괄 완료처리</button>';
+              bulkButtonsHtml = '<button class="btn-text-sm" data-action="bulk-complete" data-bucket="' + g.key + '" ' + (offline ? 'disabled' : '') + '>일괄 완료처리</button>';
             } else {
-              bulkButtonsHtml = '<button class="btn-text-sm" data-action="bulk-call" data-bucket="' + g.key + '" ' + (offline ? 'disabled' : '') + '>일괄 호출</button>';
+              bulkButtonsHtml = '<button class="btn-text-sm" data-action="bulk-revert" data-bucket="' + g.key + '" ' + (offline ? 'disabled' : '') + '>일괄 되돌리기</button>';
             }
           }
           var bulkBar = selectedCount > 0 ? '<div class="group-bulk-bar"><span>' + selectedCount + '건 선택됨</span>' + bulkButtonsHtml + '</div>' : '';
@@ -533,18 +580,18 @@
           });
         });
       });
-      listEl.querySelectorAll('[data-action="bulk-call"]').forEach(function (el) {
+      listEl.querySelectorAll('[data-action="bulk-revert"]').forEach(function (el) {
         el.addEventListener('click', function () {
           if (AppState.get().isOffline) return;
           var key = el.getAttribute('data-bucket');
           var group = groups.find(function (g) { return String(g.key) === key; });
           var ids = group.orders
-            .filter(function (o) { return selectedIds[o.id] && o.status !== 'CANCELED'; })
+            .filter(function (o) { return selectedIds[o.id] && o.status === 'COMPLETED'; })
             .map(function (o) { return o.id; });
           if (ids.length === 0) return;
-          Promise.all(ids.map(function (id) { return MockApi.sendKakaoAlert(id); })).then(function () {
+          Promise.all(ids.map(function (id) { return MockApi.revertCompletedToReceived(id); })).then(function () {
             ids.forEach(function (id) { delete selectedIds[id]; });
-            UI.showToast(ids.length + '건 일괄 호출했습니다');
+            UI.showToast(ids.length + '건 일괄 되돌렸어요');
             loadAndRender();
           });
         });
@@ -577,7 +624,7 @@
         var revertBtn = cardEl.querySelector('[data-action="revert-btn"]');
         if (revertBtn) revertBtn.addEventListener('click', function () { onRevertClick(orderId); });
         var cancelBtn = cardEl.querySelector('[data-action="cancel-btn"]');
-        if (cancelBtn) cancelBtn.addEventListener('click', function () { openCancelModal(orderId); });
+        if (cancelBtn) cancelBtn.addEventListener('click', function () { openCancelModal(orderId, activeSegment); });
       });
     }
 
@@ -589,7 +636,7 @@
     function onAcceptClick(orderId) {
       MockApi.advanceOrderStatus(orderId, 'RECEIVED').then(
         function () {
-          UI.showToast('주문을 수락했습니다');
+          UI.showToast('주문을 수락했어요 · \'주문 완료\' 알림톡을 발송했어요');
           loadAndRender();
         },
         function (err) {
@@ -666,28 +713,17 @@
       );
     }
 
-    function openInfoModal(title, message) {
-      var host = root.querySelector('#customer-modal-host');
-      host.innerHTML =
-        '<div class="modal-overlay" id="info-modal-overlay">' +
-          '<div class="modal-sheet">' +
-            '<div class="modal-sheet-header">' +
-              '<span class="modal-sheet-title">' + UI.escapeHtml(title) + '</span>' +
-            '</div>' +
-            '<div class="modal-sheet-body"><div class="helper-text" style="text-align:left;">' + UI.escapeHtml(message) + '</div></div>' +
-            '<div class="modal-sheet-footer">' +
-              UI.button({ label: '확인', action: 'close-info-modal', variant: 'primary' }) +
-            '</div>' +
-          '</div>' +
-        '</div>';
-      var overlay = host.querySelector('#info-modal-overlay');
-      overlay.addEventListener('click', function (e) { if (e.target === overlay) closeModal(); });
-      host.querySelector('[data-action="close-info-modal"]').addEventListener('click', closeModal);
-    }
+    // segment별 취소 액션 메타 — 대기 탭 '주문 취소'(알림톡 없음), 처리중 탭 '결제 취소', 완료 탭 '반품'
+    var CANCEL_KIND_META = {
+      WAITING: { title: '주문을 취소할까요?', notifyKind: null, successMessage: '주문을 취소했어요' },
+      RECEIVED: { title: '결제를 취소할까요?', notifyKind: 'PAYMENT_CANCELED', successMessage: '결제를 취소했어요 · \'결제 취소\' 알림톡을 발송했어요' },
+      DONE: { title: '반품 처리할까요?', notifyKind: 'RETURNED', successMessage: '반품 처리했어요 · \'반품\' 알림톡을 발송했어요' },
+    };
 
-    function openCancelModal(orderId) {
+    function openCancelModal(orderId, segment) {
       selectedCancelReason = null;
       customCancelReasonText = '';
+      var kindMeta = CANCEL_KIND_META[segment] || CANCEL_KIND_META.WAITING;
       var host = root.querySelector('#customer-modal-host');
 
       function renderCancelModal() {
@@ -697,7 +733,7 @@
           '<div class="modal-overlay" id="cancel-modal-overlay">' +
             '<div class="modal-sheet">' +
               '<div class="modal-sheet-header">' +
-                '<span class="modal-sheet-title">주문을 취소할까요?</span>' +
+                '<span class="modal-sheet-title">' + UI.escapeHtml(kindMeta.title) + '</span>' +
                 '<button class="icon-btn" data-action="close-modal">' + UI.Icons.close + '</button>' +
               '</div>' +
               '<div class="modal-sheet-body">' +
@@ -740,10 +776,10 @@
         host.querySelector('[data-action="confirm-cancel"]').addEventListener('click', function () {
           var reason = isCustom ? customCancelReasonText.trim() : selectedCancelReason;
           if (!reason) return;
-          MockApi.cancelOrder(orderId, reason).then(
+          MockApi.cancelOrder(orderId, reason, kindMeta.notifyKind).then(
             function () {
               closeModal();
-              openInfoModal('취소 완료', '취소 처리가 완료되었습니다');
+              UI.showToast(kindMeta.successMessage);
               loadAndRender();
             },
             function (err) {

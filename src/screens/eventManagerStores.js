@@ -56,14 +56,13 @@
         (alreadyCount > 0 ? ' 이미 ' + meta.label + ' 상태인 매장 ' + alreadyCount + '개는 제외됩니다.' : '');
 
       openConfirmModal(opts.hostEl, meta.actionLabel + ' 확인', message, meta.actionLabel, function () {
-        executeBulkUpdate(targetIds, opts.targetStatus, scopeLabel, opts.hostEl, opts.onDone);
+        executeBulkUpdate(targetIds, opts.targetStatus, opts.hostEl, opts.onDone);
       });
     });
   }
 
-  function executeBulkUpdate(storeIds, targetStatus, scopeLabel, hostEl, onDone) {
-    var actor = AppState.get().currentUser;
-    MockApi.bulkUpdateStoreStatus(storeIds, targetStatus, actor, scopeLabel).then(function (result) {
+  function executeBulkUpdate(storeIds, targetStatus, hostEl, onDone) {
+    MockApi.bulkUpdateStoreStatus(storeIds, targetStatus).then(function (result) {
       showResultModal(hostEl, result, targetStatus, onDone);
       if (onDone) onDone();
     });
@@ -132,7 +131,7 @@
       retryBtn.addEventListener('click', function () {
         var retryIds = result.failed.map(function (f) { return f.storeId; });
         closeHostModal(hostEl);
-        executeBulkUpdate(retryIds, targetStatus, '재시도 ' + retryIds.length + '개', hostEl, onDone);
+        executeBulkUpdate(retryIds, targetStatus, hostEl, onDone);
       });
     }
   }
@@ -157,8 +156,6 @@
           '</select>' +
         '</div>' +
         '<div id="em-store-list"></div>' +
-        '<div style="font-weight:800;font-size:14px;margin:20px 0 8px;">최근 조치 이력</div>' +
-        '<div id="em-audit-log-list"></div>' +
         '<div id="em-store-bulk-bar"></div>' +
         '<div id="em-store-modal-host"></div>' +
       '</div>'
@@ -179,12 +176,11 @@
           '<label class="order-checkbox-label" style="padding-top:2px;">' +
             '<input type="checkbox" class="em-store-checkbox" data-store-id="' + store.id + '" ' + (checked ? 'checked' : '') + ' />' +
           '</label>' +
-          '<div style="flex:1;min-width:0;cursor:pointer;" data-action="view-store-orders" data-store-id="' + store.id + '">' +
+          '<div style="flex:1;min-width:0;">' +
             '<div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;">' +
               '<span style="font-weight:800;font-size:15px;">' + UI.escapeHtml(store.name) + '</span>' +
               '<span class="operating-status-dot ' + meta.dotClass + '"></span>' +
               '<span style="font-size:12px;font-weight:700;">' + meta.label + '</span>' +
-              '<span class="settings-list-chevron" style="margin-left:auto;">' + UI.Icons.chevronRight + '</span>' +
             '</div>' +
             '<div style="font-size:12px;color:var(--color-text-secondary);margin-top:2px;">' +
               (store.boothNumber ? UI.escapeHtml(store.boothNumber) + ' · ' : '') + '상태 변경 ' + timeAgoOrDash(store.statusChangedAt) +
@@ -245,28 +241,15 @@
     return list;
   }
 
-  function auditLogItemHtml(log) {
-    return (
-      '<div class="card" style="margin-bottom:8px;">' +
-        '<div style="font-size:13px;font-weight:700;">' + UI.escapeHtml(log.action) + '</div>' +
-        '<div style="font-size:12px;color:var(--color-text-secondary);margin-top:2px;">' + UI.escapeHtml(log.resultSummary) + ' · ' + UI.timeAgoLabel(log.timestamp) + '</div>' +
-      '</div>'
-    );
-  }
-
   function mount(root) {
     var eventId = AppState.get().currentEventId;
     selectedIds = {};
 
     function load() {
-      Promise.all([
-        MockApi.getStoresByEvent(eventId),
-        MockApi.getAuditLogs(eventId),
-      ]).then(function (results) {
-        storesCache = results[0].stores;
+      MockApi.getStoresByEvent(eventId).then(function (res) {
+        storesCache = res.stores;
         renderFilterTabs();
         renderList();
-        renderAuditLog(results[1].auditLogs);
       });
     }
 
@@ -287,15 +270,6 @@
       });
     }
 
-    function renderAuditLog(logs) {
-      var host = root.querySelector('#em-audit-log-list');
-      if (logs.length === 0) {
-        host.innerHTML = '<div class="helper-text" style="text-align:left;">아직 조치 이력이 없어요.</div>';
-        return;
-      }
-      host.innerHTML = logs.slice(0, 10).map(auditLogItemHtml).join('');
-    }
-
     function renderList() {
       var listEl = root.querySelector('#em-store-list');
       var list = visibleStores();
@@ -309,11 +283,6 @@
     }
 
     function wireListEvents() {
-      root.querySelectorAll('[data-action="view-store-orders"]').forEach(function (el) {
-        el.addEventListener('click', function () {
-          Router.showScreen('eventManagerStoreOrders', { storeId: el.getAttribute('data-store-id') });
-        });
-      });
       root.querySelectorAll('.em-store-checkbox').forEach(function (el) {
         el.addEventListener('change', function () {
           var id = el.getAttribute('data-store-id');

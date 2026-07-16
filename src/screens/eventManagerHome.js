@@ -61,8 +61,12 @@
 
   function orderCountInnerHtml(summary) {
     return (
-      '<div style="font-size:13px;color:var(--color-text-secondary);margin-bottom:4px;">오늘 총 주문건수</div>' +
-      '<div style="font-size:24px;font-weight:800;">' + summary.todayOrderCount + '건</div>'
+      '<div style="display:flex;justify-content:space-between;">' +
+        '<div><div style="font-size:13px;color:var(--color-text-secondary);margin-bottom:4px;">오늘 주문건수</div>' +
+          '<div style="font-size:24px;font-weight:800;">' + summary.todayOrderCount + '건</div></div>' +
+        '<div style="text-align:right;"><div style="font-size:13px;color:var(--color-text-secondary);margin-bottom:4px;">행사 누적 주문건수</div>' +
+          '<div style="font-size:24px;font-weight:800;">' + summary.totalOrderCount + '건</div></div>' +
+      '</div>'
     );
   }
 
@@ -87,6 +91,7 @@
       '<div style="padding: 8px 20px 24px;">' +
         '<div style="margin-bottom:16px;">' +
           '<div style="font-size:20px;font-weight:800;" id="em-home-event-name">불러오는 중...</div>' +
+          '<div style="font-size:13px;color:var(--color-text-secondary);margin-top:2px;" id="em-home-event-location"></div>' +
           '<div style="font-size:13px;color:var(--color-text-secondary);margin-top:2px;" id="em-home-event-period"></div>' +
           '<div style="font-size:13px;color:var(--color-text-secondary);margin-top:2px;" id="em-home-manager"></div>' +
         '</div>' +
@@ -96,8 +101,9 @@
         '<div style="font-weight:800;font-size:15px;margin-bottom:8px;">주의가 필요한 매장</div>' +
         '<div id="em-attention-list"></div>' +
         '<div style="display:flex;gap:8px;margin-top:20px;">' +
-          '<div style="flex:1;">' + UI.button({ label: '전체 매장 마감', action: 'em-close-all', variant: 'danger-solid' }) + '</div>' +
           '<div style="flex:1;">' + UI.button({ label: '전체 매장 개점', action: 'em-open-all', variant: 'success' }) + '</div>' +
+          '<div style="flex:1;">' + UI.button({ label: '전체 매장 일시중지', action: 'em-pause-all', variant: 'warning' }) + '</div>' +
+          '<div style="flex:1;">' + UI.button({ label: '전체 매장 마감', action: 'em-close-all', variant: 'danger-solid' }) + '</div>' +
         '</div>' +
         '<div id="em-home-modal-host"></div>' +
       '</div>'
@@ -120,6 +126,7 @@
         var attentionItems = results[2].items;
 
         root.querySelector('#em-home-event-name').textContent = event.name;
+        root.querySelector('#em-home-event-location').textContent = event.location;
         root.querySelector('#em-home-event-period').textContent =
           formatEventPeriod(event.startDate, event.endDate) + ' · ' + dayCountLabel(event.startDate, event.endDate);
         var user = AppState.get().currentUser;
@@ -155,6 +162,16 @@
         scopeType: 'ALL',
         storeIds: null,
         targetStatus: 'OPEN',
+        hostEl: root.querySelector('#em-home-modal-host'),
+        onDone: load,
+      });
+    });
+    root.querySelector('[data-action="em-pause-all"]').addEventListener('click', function () {
+      window.EventManagerStores.runBulkAction({
+        eventId: eventId,
+        scopeType: 'ALL',
+        storeIds: null,
+        targetStatus: 'PAUSED',
         hostEl: root.querySelector('#em-home-modal-host'),
         onDone: load,
       });

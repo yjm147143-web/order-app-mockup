@@ -88,14 +88,10 @@
     }
 
     function routeOwner(user) {
+      // 기능명세서 기준 사장님/직원 계정은 매장 1곳에 소속되므로 별도 매장 선택 화면 없이 바로 진입한다.
       MockApi.getMyStores(user.id).then(function (storeRes) {
-        var forceStoreSelect = location.search.indexOf('forceStoreSelect=1') !== -1;
-        if (!forceStoreSelect && storeRes.stores.length === 1) {
-          AppState.selectStore(storeRes.stores[0].id);
-          Router.showScreen('customers');
-        } else {
-          Router.showScreen('storeSelect', { stores: storeRes.stores });
-        }
+        AppState.selectStore(storeRes.stores[0].id);
+        Router.showScreen('customers');
       });
     }
 
@@ -113,7 +109,9 @@
             errorEl.style.display = 'block';
             return;
           }
-          if (selectedRole === 'OWNER' && user.role !== 'OWNER') {
+          // '사장님' 탭은 OWNER 계정뿐 아니라 그 매장 소속 STAFF(직원) 계정도 로그인 대상이다 —
+          // 로그인 화면에는 별도의 '직원' 탭이 없다.
+          if (selectedRole === 'OWNER' && user.role !== 'OWNER' && user.role !== 'STAFF') {
             errorEl.textContent = '사장님 계정이 아닙니다.';
             errorEl.style.display = 'block';
             return;
